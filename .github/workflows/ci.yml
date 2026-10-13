@@ -33,7 +33,6 @@ jobs:
     env:
       DATABASE_URL: postgresql://aira_test:aira_ci_test@127.0.0.1:5432/aira_test
       AIRA_TEST_DATABASE_URL: postgresql://aira_test:aira_ci_test@127.0.0.1:5432/aira_test
-      AIRA_LOAD_REPORT: ${{ runner.temp }}/aira-load-report.json
 
     steps:
       - name: Check out repository
@@ -56,6 +55,8 @@ jobs:
         run: npm ci
 
       - name: Run all tests
+        env:
+          AIRA_LOAD_REPORT: ${{ runner.temp }}/aira-load-report.json
         run: npm test
 
       - name: Build application and check types
