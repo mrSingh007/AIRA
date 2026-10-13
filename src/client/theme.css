@@ -1,0 +1,122 @@
+/* Components retain their existing dark colors as fallbacks. The light palette
+   supplies semantic colors at the root, including nested Markdown and forms. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4f7f6;
+  --sidebar: #f9fbfa;
+  --panel: #ffffff;
+  --panel-light: #eef3f1;
+  --border: #d3dfda;
+  --muted: #587078;
+  --text: #1c3038;
+  --accent: #176b53;
+  --accent-hover: #105740;
+  --accent-dim: #e4f2eb;
+  --danger: #aa3832;
+  --theme-text: var(--text);
+  --theme-secondary: #39545d;
+  --theme-muted: var(--muted);
+  --theme-surface: #ffffff;
+  --theme-input: #ffffff;
+  --theme-soft: #edf3f0;
+  --theme-raised: #e4ede8;
+  --theme-code-bg: #f0f4f2;
+  --theme-border: var(--border);
+  --theme-border-focus: #659b87;
+  --theme-accent-text: #17634e;
+  --theme-accent-bg: #e3f1e9;
+  --theme-accent-hover-bg: #d2e9dc;
+  --theme-accent-border: #a8cbbb;
+  --theme-on-accent: #ffffff;
+  --theme-danger: #aa3832;
+  --theme-danger-bg: #fff0ed;
+  --theme-danger-border: #e7b5ae;
+  --theme-warning: #7b550b;
+  --theme-warning-bg: #fff6df;
+  --theme-warning-border: #dfca93;
+  --theme-violet: #62508c;
+  --theme-violet-bg: #eeeaf6;
+  --theme-violet-border: #cec3e2;
+  --theme-selection: #31775d;
+  --theme-scrollbar: #a7beb4;
+  --theme-auth-bg:
+    radial-gradient(ellipse at 5% 100%, #c5e7d6 0%, transparent 65%), #eaf3ed;
+  --theme-auth-form-bg: #f9fbfa;
+  --theme-sprint-bg: linear-gradient(100deg, #e2f2e8, #f4f8f5 66%);
+}
+
+.theme-control {
+  margin: 0 5px 16px;
+}
+.theme-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 550;
+  color: var(--muted);
+  margin-bottom: 9px;
+}
+.theme-options {
+  display: flex;
+  padding: 3px;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+}
+.theme-options button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex: 1;
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.theme-options button:hover {
+  background: var(--panel-light);
+  color: var(--text);
+}
+.theme-options button[aria-pressed="true"] {
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-weight: 600;
+}
+.theme-floating {
+  position: fixed;
+  top: 18px;
+  right: 22px;
+  z-index: 40;
+}
+.theme-floating .theme-control {
+  margin: 0;
+}
+.theme-floating .theme-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.theme-floating .theme-options {
+  box-shadow: 0 3px 15px #00000008;
+}
+.overview-summary.backlog-summary {
+  grid-template-columns: 1fr;
+}
+.sidebar {
+  overflow-y: auto;
+}
+
+@media (max-width: 700px) {
+  .theme-floating {
+    top: 12px;
+    right: 14px;
+  }
+  .theme-floating .theme-options button {
+    padding: 5px 9px;
+    min-height: 30px;
+  }
+}

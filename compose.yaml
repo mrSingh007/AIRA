@@ -1,0 +1,63 @@
+name: aira
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aira
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: aira
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aira -d aira"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    networks: [database]
+  sandbox-image:
+    image: aira-sandbox:local
+    build:
+      context: .
+      dockerfile: sandbox/Dockerfile
+      args:
+        CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-latest}
+    entrypoint: ["true"]
+    restart: "no"
+    networks: [outbound]
+  app:
+    image: aira:local
+    stop_grace_period: 100s
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${AIRA_BIND:-127.0.0.1}:${AIRA_PORT:-3000}:3000"
+    environment:
+      PORT: 3000
+      NODE_ENV: production
+      DATABASE_URL: postgresql://aira:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/aira
+      APP_SECRET: ${APP_SECRET:?Set APP_SECRET in .env}
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      SANDBOX_DOCKER_IMAGE: aira-sandbox:local
+      RUN_TIMEOUT_SECONDS: ${RUN_TIMEOUT_SECONDS:-900}
+    volumes:
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+    depends_on:
+      db:
+        condition: service_healthy
+      sandbox-image:
+        condition: service_completed_successfully
+    networks: [database, outbound]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+volumes:
+  postgres_data:
+networks:
+  database:
+    internal: true
+  outbound:
