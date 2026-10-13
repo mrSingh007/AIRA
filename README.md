@@ -185,6 +185,8 @@ export AIRA_TEST_DATABASE_URL='postgresql://test_user:test_password@127.0.0.1:54
 DATABASE_URL="$AIRA_TEST_DATABASE_URL" npm test
 ```
 
+The concurrency integration test runs the full 100-developer workload and records latency measurements. Its default p95 latency limit is 1,000 ms. GitHub CI uses a 5,000 ms guardrail on shared hosted runners. Set `AIRA_LOAD_MAX_P95_MS` to a positive value up to 15,000 ms to choose a limit for your test environment; the selected limit is included in the load report. All correctness checks and the workload run with either limit.
+
 Replace the example URL with your test database's connection string. Keep it separate from your running application's database. Start the compiled application with `npm start`.
 
 ## Author and license

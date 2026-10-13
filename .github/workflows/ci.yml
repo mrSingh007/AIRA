@@ -56,6 +56,8 @@ jobs:
 
       - name: Run all tests
         env:
+          # Shared hosted runners use a 5s guardrail; local tests default to 1s.
+          AIRA_LOAD_MAX_P95_MS: '5000'
           AIRA_LOAD_REPORT: ${{ runner.temp }}/aira-load-report.json
         run: npm test
 
