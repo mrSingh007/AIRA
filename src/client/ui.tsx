@@ -170,13 +170,9 @@ export function EmptyState({
 export function Brand() {
   return (
     <div className="brand">
-      <span className="brand-mark">
-        <i />
-        <i />
-        <i />
-      </span>
+      <img className="brand-mark" src="/kangentix-logo.svg" alt="" aria-hidden="true" />
       <span>
-        AIRA<span className="brand-dot">.</span>
+        Kangentix
       </span>
     </div>
   );

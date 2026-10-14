@@ -5,6 +5,7 @@ dist/
 !.env.example
 .DS_Store
 *.log
-.aira-data/
+.kangentix-data/
+.local-backups/
 __pycache__/
 *.py[cod]

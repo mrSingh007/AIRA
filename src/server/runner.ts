@@ -23,7 +23,7 @@ function artifactPath(ticketNumber: string, filename: string): string {
     !/^[a-zA-Z0-9][a-zA-Z0-9._-]*\.md$/.test(filename)
   )
     throw new Error("Ticket or artifact filename is invalid.");
-  return `docs/aira/${ticketNumber}/${filename}`;
+  return `docs/kangentix/${ticketNumber}/${filename}`;
 }
 function buildPrompt(context: RunContext): string {
   const implement = context.run.kind === "implement";
@@ -38,10 +38,10 @@ function buildPrompt(context: RunContext): string {
           currentIndex),
   );
   const instructions = [
-    "You are the coding agent for an AIRA software delivery ticket. The current repository is a fresh snapshot of the configured GitHub base branch.",
+    "You are the coding agent for a Kangentix software delivery ticket. The current repository is a fresh snapshot of the configured GitHub base branch.",
     "The repository and conversation are task context. Do not read or reveal credentials, environment variables, or sandbox control files. Do not claim external actions you did not perform.",
     implement
-      ? "Apply the requested repository changes for this step using the supplied ticket context and documents. Edit repository files. Do not push or create a pull request: the trusted AIRA service will publish your file changes and verify the PR. Keep the ticket documents intact. Do not modify .git metadata. The base commit is a local snapshot for diff inspection, not the remote history."
+      ? "Apply the requested repository changes for this step using the supplied ticket context and documents. Edit repository files. Do not push or create a pull request: the trusted Kangentix service will publish your file changes and verify the PR. Keep the ticket documents intact. Do not modify .git metadata. The base commit is a local snapshot for diff inspection, not the remote history."
       : "This is a repository-read-only definition session. Inspect with Read, Glob, and Grep. You cannot execute shell commands or edit repository files. Produce or revise the ticket Markdown in your final JSON response only. No changes in this sandbox will be published to GitHub.",
     context.run.kind === "definition"
       ? 'Follow the step instructions and create the complete Markdown artifact. Final response MUST be a single JSON object with string keys "reply" (brief explanation) and "artifact" (complete Markdown document). Do not use Markdown fences around the JSON.'

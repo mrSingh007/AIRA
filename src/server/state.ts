@@ -1,15 +1,18 @@
 import type { DatabaseClient } from "./db.js";
 import { concurrencySettings, effectiveConcurrency } from "./project-agent-settings.js";
 import { enqueueRun, listRuns, ticketBusy } from "./run-repository.js";
+import { recordSprintCompletion } from "./analytics.js";
 import { randomUUID } from "node:crypto";
 import { current, isDraft } from "immer";
 import { DEFAULT_MAX_CONCURRENT_RUNS } from "../shared/types.js";
+import { hasProjectPermission, projectPermissions } from "../shared/permissions.js";
 import {
   implementationReady,
   requiredApprovalCount,
 } from "../shared/workflow.js";
 import type {
   User,
+  ProjectPermission,
   Project,
   Ticket,
   Sprint,
@@ -29,6 +32,7 @@ export interface StoredUser extends User {
   passwordHash: string;
 }
 export interface StoredProject extends Omit<Project, "maxConcurrentRuns"> {
+  permissionVersion?: 2;
   secrets: { githubToken: string; ollamaApiKey: string; claudeApiKey: string; e2bApiKey: string };
 }
 export interface Session {
@@ -64,6 +68,21 @@ export const emptyState = (): State => ({
   sessions: [],
   attachmentData: {},
 });
+/** Preserve the original account as the permanent system user across legacy state. */
+export function ensureSystemUser(state: State) {
+  const systemUser = state.users.find(user => user.isSystemUser) ?? state.users[0];
+  if (!systemUser) return;
+  systemUser.isSystemUser = true;
+  for (const project of state.projects) {
+    project.roles[systemUser.id] = "admin";
+    if (project.permissionVersion !== 2) {
+      for (const permissions of Object.values(project.memberPermissions ?? {})) {
+        if (permissions.includes("generalWrite") && !permissions.includes("sandboxWrite")) permissions.push("sandboxWrite");
+      }
+      project.permissionVersion = 2;
+    }
+  }
+}
 export const id = () => randomUUID();
 export const now = () => new Date().toISOString();
 export class ApiError extends Error {
@@ -87,18 +106,61 @@ export function publicUser(user: StoredUser): User {
     name: user.name,
     email: user.email,
     mustChangePassword: user.mustChangePassword,
+    isSystemUser: user.isSystemUser,
   };
 }
-export async function publicProject(project: StoredProject, client?: DatabaseClient, limit?: number): Promise<Project> {
-  const { secrets: _secrets, ...safe } = project;
-  return {
+/** Hide the system account from every response to other accounts, retaining approval totals. */
+export function hideSystemUser<T>(state: State, viewerId: string, value: T): T {
+  if (state.users.some(user => user.id === viewerId && user.isSystemUser)) return value;
+  const hidden = state.users.filter(user => user.isSystemUser);
+  if (!hidden.length) return value;
+  const hiddenIds = new Set(hidden.map(user => user.id));
+  const identityText = [...new Set(hidden.flatMap(user => [user.id, user.email]).filter(Boolean))];
+  const scrubText = (text: string) => identityText.reduce((result, identity) => result.replaceAll(identity, ""), text);
+  const visit = (item: any): any => {
+    if (typeof item === "string") return scrubText(item);
+    if (Array.isArray(item)) return item.filter(child => !(typeof child === "string" && hiddenIds.has(child)) && !(child && typeof child === "object" && hiddenIds.has(child.id))).map(visit);
+    if (!item || typeof item !== "object") return item;
+    const result: Record<string, any> = {};
+    for (const [key, child] of Object.entries(item)) {
+      if (hiddenIds.has(key) || key === "isSystemUser") continue;
+      if (["createdBy", "updatedBy", "authorId", "userId"].includes(key) && typeof child === "string" && hiddenIds.has(child)) {
+        result[key] = key === "authorId" || (key === "userId" && !!item.action) ? null : "";
+      } else result[key] = visit(child);
+    }
+    if (item.action && typeof item.detail === "string" && hiddenIds.has(item.userId)) {
+      let detail = result.detail;
+      for (const user of hidden) {
+        const escaped = user.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        if (escaped) detail = detail.replace(new RegExp(`(?<![a-zA-Z0-9_])${escaped}(?![a-zA-Z0-9_])`, "g"), "");
+      }
+      result.detail = detail;
+    }
+    if (Array.isArray(item.approverIds)) {
+      const count = item.approverIds.filter((id: string) => hiddenIds.has(id)).length;
+      if (count) result.hiddenApproverCount = count;
+    }
+    if (item.ticketId && item.stepId && hiddenIds.has(item.userId) && !item.action) {
+      const ticket = state.tickets.find(ticket => ticket.id === item.ticketId);
+      const steps = ticket?.status === "closed" ? ticket.workflowSnapshot : state.projects.find(project => project.id === ticket?.projectId)?.steps;
+      if (steps?.some(step => step.id === item.stepId && step.approverIds.includes(item.userId))) result.anonymous = true;
+    }
+    return result;
+  };
+  return visit(value) as T;
+}
+export async function publicProject(project: StoredProject, client?: DatabaseClient, limit?: number, viewer?: { state: State; userId: string }): Promise<Project> {
+  const { secrets: _secrets, permissionVersion: _version, ...safe } = project;
+  const result = {
     ...safe,
+    analyticsMemberIds: project.analyticsMemberIds ?? [],
     maxConcurrentRuns: limit ?? await effectiveConcurrency(project.id, client),
     hasOllamaKey: !!project.secrets.ollamaApiKey,
     hasClaudeKey: !!project.secrets.claudeApiKey,
     hasE2bKey: !!project.secrets.e2bApiKey,
     githubConnected: !!project.secrets.githubToken && !!project.githubIdentity,
   };
+  return viewer ? hideSystemUser(viewer.state, viewer.userId, result) : result;
 }
 export function roleFor(
   project: Project | StoredProject,
@@ -112,11 +174,15 @@ export function canAccess(
 ): boolean {
   return !!roleFor(project, userId);
 }
+export function canCreateProjects(state: State, userId: string): boolean {
+  return state.users.some(user => user.id === userId && user.isSystemUser) || state.projects.some((project) => roleFor(project, userId) === "admin") ||
+    (state.projects.length === 0 && state.users[0]?.id === userId);
+}
 export function projectFor(
   state: State,
   projectId: string,
   userId: string,
-  admin = false,
+  permission: boolean | ProjectPermission = false,
 ): StoredProject {
   const project = state.projects.find((p) => p.id === projectId);
   assert(
@@ -125,9 +191,9 @@ export function projectFor(
     "Project not found.",
   );
   assert(
-    !admin || roleFor(project, userId) === "admin",
+    !permission || (permission === true ? roleFor(project, userId) === "admin" : hasProjectPermission(project, userId, permission)),
     403,
-    "Project administrator access is required.",
+    "The required project permission is missing.",
   );
   return project;
 }
@@ -140,21 +206,23 @@ export function ticketFor(
   assert(ticket, 404, "Ticket not found.");
   return { ticket, project: projectFor(state, ticket.projectId, userId) };
 }
-export function membersFor(state: State, project: StoredProject): Member[] {
+export function membersFor(state: State, project: StoredProject, viewerId?: string): Member[] {
   return state.users
-    .filter((u) => !!project.roles[u.id])
+    .filter((u) => !!project.roles[u.id] && (!u.isSystemUser || !viewerId || state.users.some(user => user.id === viewerId && user.isSystemUser)))
     .map((u) => ({
       ...publicUser(u),
       role: project.roles[u.id],
+      permissions: projectPermissions(project, u.id),
     }));
 }
 export async function sessionData(state: State, user: StoredUser, client?: DatabaseClient): Promise<SessionData> {
   const limits = await concurrencySettings(client);
   return {
     user: publicUser(user),
+    canCreateProjects: canCreateProjects(state, user.id),
     projects: await Promise.all(state.projects
       .filter((p) => canAccess(p, user.id))
-      .map(p => publicProject(p, client, limits.get(p.id) ?? DEFAULT_MAX_CONCURRENT_RUNS))),
+      .map(p => publicProject(p, client, limits.get(p.id) ?? DEFAULT_MAX_CONCURRENT_RUNS, { state, userId: user.id }))),
   };
 }
 export function audit(
@@ -272,6 +340,7 @@ export async function advanceCurrentStep(
     ticket.workflowSnapshot = structuredClone(isDraft(project.steps) ? current(project.steps) : project.steps);
     ticket.status = "closed";
     ticket.closedAt = now();
+    recordSprintCompletion(state, ticket);
     audit(
       state,
       project.id,

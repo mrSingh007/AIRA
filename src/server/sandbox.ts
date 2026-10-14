@@ -32,7 +32,7 @@ export interface AgentSandbox {
 }
 export const runTimeoutMs = Math.max(60_000, Math.min(3_000_000, Number(process.env.RUN_TIMEOUT_SECONDS || 900) * 1000 || 900_000));
 const OUTPUT_LIMIT = 32 * 1024 * 1024;
-const ROOT = "/tmp/aira";
+const ROOT = "/tmp/kangentix";
 export const sandboxOwnerId = () => createHash("sha256").update(process.env.APP_SECRET || "").digest("hex").slice(0, 24);
 
 export class E2BCreationRefusedError extends Error {
@@ -202,12 +202,12 @@ export async function disposeOwnedSandbox(resource: SandboxResource, credential 
     return;
   }
   let owner: string;
-  try { owner = (await processCommand(["inspect", "--format", '{{ index .Config.Labels "aira.owner" }}', resource.id], 30_000)).trim(); }
+  try { owner = (await processCommand(["inspect", "--format", '{{ index .Config.Labels "kangentix.owner" }}', resource.id], 30_000)).trim(); }
   catch (error) {
     if (error instanceof Error && /No such (object|container)/i.test(error.message)) return;
     throw error;
   }
-  if (owner !== sandboxOwnerId()) throw new Error("Refusing to remove a Docker sandbox owned by another AIRA installation.");
+  if (owner !== sandboxOwnerId()) throw new Error("Refusing to remove a Docker sandbox owned by another Kangentix installation.");
   await processCommand(["rm", "-f", resource.id], 30_000);
 }
 
@@ -215,7 +215,7 @@ export async function discoverOwnedSandboxes(projectId: string, runId: string, p
   const owner = sandboxOwnerId();
   if (provider === "e2b") {
     // The installed SDK lists both running and paused sandboxes through an explicitly paginated API.
-    const paginator = Sandbox.list({ apiKey: credential, requestTimeoutMs: 30_000, retries: 0, query: { metadata: { app: "aira", owner, projectId, runId } }, limit: 100 });
+    const paginator = Sandbox.list({ apiKey: credential, requestTimeoutMs: 30_000, retries: 0, query: { metadata: { app: "kangentix", owner, projectId, runId } }, limit: 100 });
     const found: SandboxResource[] = [];
     while (paginator.hasNext) {
       for (const item of await paginator.nextItems()) {
@@ -225,7 +225,7 @@ export async function discoverOwnedSandboxes(projectId: string, runId: string, p
     }
     return found;
   }
-  const text = await processCommand(["ps", "-a", "--no-trunc", "--filter", "label=app=aira-sandbox", "--filter", `label=aira.owner=${owner}`, "--filter", `label=aira.project=${projectId}`, "--filter", `label=aira.run=${runId}`, "--format", '{{.ID}}|{{.Label "aira.expires"}}'], 30_000);
+  const text = await processCommand(["ps", "-a", "--no-trunc", "--filter", "label=app=kangentix-sandbox", "--filter", `label=kangentix.owner=${owner}`, "--filter", `label=kangentix.project=${projectId}`, "--filter", `label=kangentix.run=${runId}`, "--format", '{{.ID}}|{{.Label "kangentix.expires"}}'], 30_000);
   return text.trim().split("\n").filter(Boolean).map((line) => {
     const [id, expiresAt] = line.split("|");
     if (!/^[a-f0-9]{64}$/.test(id) || !Number.isFinite(Date.parse(expiresAt))) throw new Error("Docker discovery returned invalid ownership metadata.");
@@ -255,7 +255,7 @@ export async function createAgentSandbox(context: RunContext, onLog: (line: stri
     try {
       // Retries are disabled: an ambiguous creation must be discovered by ownership metadata first.
       const id = await e2bControlPlane.create(context.project.e2bTemplate || DEFAULT_E2B_TEMPLATE, credential, runTimeoutMs + 240_000,
-        { app: "aira", owner: sandboxOwnerId(), projectId: context.project.id, runId: context.run.id }, signal);
+        { app: "kangentix", owner: sandboxOwnerId(), projectId: context.project.id, runId: context.run.id }, signal);
       resource = { provider, id, expiresAt: new Date(Date.now() + runTimeoutMs + 240_000).toISOString() };
     } catch (error) {
       const pressure = (error instanceof E2BCreationRefusedError && [429, 503].includes(error.status)) || error instanceof RateLimitError || error instanceof ServiceBusyError;
@@ -285,7 +285,7 @@ export async function createAgentSandbox(context: RunContext, onLog: (line: stri
       sandbox = await Sandbox.connect(resource.id, { apiKey: credential, requestTimeoutMs: 60_000, retries: 0, signal });
       await sandbox.commands.run(`mkdir -p ${ROOT}`, { user: "user", timeoutMs: 30_000, signal });
       const output = lineOutput(onLog, OUTPUT_LIMIT, secrets);
-      await sandbox.commands.run("command -v claude >/dev/null || npm install --prefix /tmp/aira-cli @anthropic-ai/claude-code", { user: "user", timeoutMs: 180_000, signal, onStdout: (chunk) => output.write(chunk, "stdout"), onStderr: (chunk) => output.write(chunk, "stderr") });
+      await sandbox.commands.run("command -v claude >/dev/null || npm install --prefix /tmp/kangentix-cli @anthropic-ai/claude-code", { user: "user", timeoutMs: 180_000, signal, onStdout: (chunk) => output.write(chunk, "stdout"), onStderr: (chunk) => output.write(chunk, "stderr") });
       await output.flush();
     } catch (error) { await cleanupFailedProvision(resource, credential, options, onLog); throw error; }
     result = {
@@ -300,7 +300,7 @@ export async function createAgentSandbox(context: RunContext, onLog: (line: stri
       },
       command: async (action, log) => {
         const output = lineOutput(log, OUTPUT_LIMIT, secrets);
-        const command = await sandbox.commands.run(`PATH=/tmp/aira-cli/node_modules/.bin:$PATH python3 ${ROOT}/runner.py ${action}`, { user: "user", signal, timeoutMs: action === "run" ? runTimeoutMs : 120_000, onStdout: (chunk) => output.write(chunk, "stdout"), onStderr: (chunk) => output.write(chunk, "stderr") });
+        const command = await sandbox.commands.run(`PATH=/tmp/kangentix-cli/node_modules/.bin:$PATH python3 ${ROOT}/runner.py ${action}`, { user: "user", signal, timeoutMs: action === "run" ? runTimeoutMs : 120_000, onStdout: (chunk) => output.write(chunk, "stdout"), onStderr: (chunk) => output.write(chunk, "stderr") });
         await output.flush();
         if (command.exitCode !== 0) throw new Error(`Sandbox ${action} failed (${command.exitCode}).`);
       },
@@ -325,20 +325,20 @@ export async function createAgentSandbox(context: RunContext, onLog: (line: stri
       dispose: () => disposeOwnedSandbox(resource!, credential),
     };
   } else {
-    const name = `aira-${sandboxOwnerId()}-${context.run.id.replace(/[^a-zA-Z0-9-]/g, "").slice(0, 60)}`;
-    const image = context.project.dockerImage || process.env.SANDBOX_DOCKER_IMAGE || "aira-sandbox:local";
+    const name = `kangentix-${sandboxOwnerId()}-${context.run.id.replace(/[^a-zA-Z0-9-]/g, "").slice(0, 60)}`;
+    const image = context.project.dockerImage || process.env.SANDBOX_DOCKER_IMAGE || "kangentix-sandbox:local";
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._/:@-]*$/.test(image)) throw new Error("Set a valid Docker image name.");
     await onLog(`Starting fresh Docker sandbox from ${image}.`);
     await options.onCreating?.(provider, expiresAt);
     try {
       // Chromium's nested sandbox cannot use setuid/user namespaces under these
       // restrictions. Electron relies on the outer disposable Docker boundary.
-      const created = await processCommand(["run", "-d", "--rm", "--name", name, "--label", "app=aira-sandbox", "--label", `aira.owner=${sandboxOwnerId()}`, "--label", `aira.project=${context.project.id}`, "--label", `aira.run=${context.run.id}`, "--label", `aira.expires=${expiresAt}`, "--user", "1000:1000", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit=256", "--memory=4g", "--cpus=2", "--tmpfs", "/tmp:rw,exec,nosuid,size=2g,mode=1777", "--env", "HOME=/tmp/aira-home", "--env", "TMPDIR=/tmp", "--env", "ELECTRON_DISABLE_SANDBOX=1", "--workdir", "/tmp", "--entrypoint", "sleep", image, String(Math.ceil((runTimeoutMs + 240_000) / 1000))], 60_000, undefined, OUTPUT_LIMIT, undefined, true, signal, secrets);
+      const created = await processCommand(["run", "-d", "--rm", "--name", name, "--label", "app=kangentix-sandbox", "--label", `kangentix.owner=${sandboxOwnerId()}`, "--label", `kangentix.project=${context.project.id}`, "--label", `kangentix.run=${context.run.id}`, "--label", `kangentix.expires=${expiresAt}`, "--user", "1000:1000", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit=256", "--memory=4g", "--cpus=2", "--tmpfs", "/tmp:rw,exec,nosuid,size=2g,mode=1777", "--env", "HOME=/tmp/kangentix-home", "--env", "TMPDIR=/tmp", "--env", "ELECTRON_DISABLE_SANDBOX=1", "--workdir", "/tmp", "--entrypoint", "sleep", image, String(Math.ceil((runTimeoutMs + 240_000) / 1000))], 60_000, undefined, OUTPUT_LIMIT, undefined, true, signal, secrets);
       const id = created.trim();
       if (!/^[a-f0-9]{64}$/.test(id)) throw new Error("Docker returned an invalid sandbox container ID.");
       resource = { provider, id, expiresAt };
       await options.onCreated?.(resource);
-      await processCommand(["exec", id, "mkdir", "-p", "-m", "700", ROOT, "/tmp/aira-home"], 60_000, undefined, OUTPUT_LIMIT, undefined, false, signal, secrets);
+      await processCommand(["exec", id, "mkdir", "-p", "-m", "700", ROOT, "/tmp/kangentix-home"], 60_000, undefined, OUTPUT_LIMIT, undefined, false, signal, secrets);
     } catch (error) {
       if (resource) await cleanupFailedProvision(resource, "", options, onLog);
       else if (error instanceof Error && /No such image|pull access denied|manifest (?:for .* )?not found|invalid reference format/i.test(error.message))

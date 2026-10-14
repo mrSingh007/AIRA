@@ -15,7 +15,7 @@ const context = (): RunContext => ({
   run: { id: "run-1", kind: "definition" },
   project: { id: "project-1", sandboxProvider: "e2b", modelProvider: "ollama", e2bTemplate: "base", repository: "owner/repo", baseBranch: "main", model: "model", steps: [] },
   step: { id: "step-1", name: "Define", instructions: "Write the definition", model: "" },
-  ticket: { number: "AIRA-1", title: "Task", description: "Context" },
+  ticket: { number: "KANGENTIX-1", title: "Task", description: "Context" },
   artifacts: [], attachments: [], messages: [],
   credentials: { githubToken: "github-secret", claudeApiKey: "contract-claude-secret", ollamaApiKey: "ollama-secret", e2bApiKey: "e2b-secret" },
 } as unknown as RunContext);
@@ -117,8 +117,9 @@ for (const template of ["", "custom-template", "base"]) {
   test(`E2B provisioning selects ${template || "claude by default"}`, async (t) => {
     const ctx = context();
     ctx.project.e2bTemplate = template;
-    mockE2BSandbox(t, async (selectedTemplate: string) => {
+    mockE2BSandbox(t, async (selectedTemplate: string, _credential: string, _lifetime: number, metadata: Record<string, string>) => {
       assert.equal(selectedTemplate, template || "claude");
+      assert.deepEqual(metadata, { app: "kangentix", owner: sandboxOwnerId(), projectId: ctx.project.id, runId: ctx.run.id });
       return { sandboxId: "template-test", commands: { run: async () => ({ exitCode: 0 }) } };
     });
     t.mock.method(Sandbox, "kill", async () => true);
@@ -180,7 +181,7 @@ test("discovery validates immutable ownership and paginates provider records", a
   });
   const resources = await discoverOwnedSandboxes("p", "r", "e2b", "secret");
   assert.deepEqual(resources.map((resource) => resource.id), ["owned-1", "owned-2"]);
-  assert.deepEqual((query as { query: unknown }).query, { metadata: { app: "aira", owner: sandboxOwnerId(), projectId: "p", runId: "r" } });
+  assert.deepEqual((query as { query: unknown }).query, { metadata: { app: "kangentix", owner: sandboxOwnerId(), projectId: "p", runId: "r" } });
 });
 
 test("runner always disposes on malformed agent response and propagates cancellation", async (t) => {

@@ -1,10 +1,10 @@
-# AIRA feature guide
+# Kangentix feature guide
 
-AIRA is a self-hosted agentic Kanban board for bounded agent execution with people in the loop. Teams take software tickets through human work, agent-generated documents, shared review, configured approvals, and GitHub pull requests. Agent runs stay within the current workflow step; people review the results and decide when work advances. The web UI and API run together; PostgreSQL stores accounts, project settings, tickets, documents, conversations, approvals, execution history, and activity. Claude Code runs outside the application in a fresh Docker or E2B sandbox, using the project's selected Ollama Cloud or Claude model provider.
+Kangentix is a self-hosted agentic Kanban board for bounded agent execution with people in the loop. Teams take software tickets through human work, agent-generated documents, shared review, configured approvals, and GitHub pull requests. Agent runs stay within the current workflow step; people review the results and decide when work advances. The web UI and API run together; PostgreSQL stores accounts, project settings, tickets, documents, conversations, approvals, execution history, and activity. Claude Code runs outside the application in a fresh Docker or E2B sandbox, using the project's selected Ollama Cloud or Claude model provider.
 
 See the [README](../README.md) for the repository overview and [LICENSE](../LICENSE) for the MIT license and credit to Harvinder Mand.
 
-## Run and try AIRA locally
+## Run and try Kangentix locally
 
 Install and start Docker Engine with Compose or Docker Desktop. From the repository root:
 
@@ -14,13 +14,13 @@ openssl rand -hex 32
 openssl rand -hex 32
 ```
 
-Put the first generated secret in `APP_SECRET` and the second in `POSTGRES_PASSWORD` in `.env`. Keep the defaults `AIRA_BIND=127.0.0.1`, `AIRA_PORT=3000`, and `APP_URL=http://localhost:3000` for a local installation. Keep `APP_SECRET` stable: it encrypts stored integration credentials. GitHub, model-provider, and E2B credentials are saved per project in the UI.
+Put the first generated secret in `APP_SECRET` and the second in `POSTGRES_PASSWORD` in `.env`. Keep the defaults `KANGENTIX_BIND=127.0.0.1`, `KANGENTIX_PORT=3000`, and `APP_URL=http://localhost:3000` for a local installation. Keep `APP_SECRET` stable: it encrypts stored integration credentials. GitHub, model-provider, and E2B credentials are saved per project in the UI.
 
 ```sh
 docker compose up --build -d
 ```
 
-Open **http://localhost:3000**. Compose builds the application and the Node-based `aira-sandbox:local` image from [`sandbox/Dockerfile`](../sandbox/Dockerfile), then starts the application and PostgreSQL. The `sandbox-image` service exits successfully after preparing the image; this is expected. Agent runs use Docker by default. Allow at least 4 GiB memory per active agent container, plus application, database, and host overhead.
+Open **http://localhost:3000**. Compose builds the application and the Node-based `kangentix-sandbox:local` image from [`sandbox/Dockerfile`](../sandbox/Dockerfile), then starts the application and PostgreSQL. The `sandbox-image` service exits successfully after preparing the image; this is expected. Agent runs use Docker by default. Allow at least 4 GiB memory per active agent container, plus application, database, and host overhead.
 
 ```sh
 docker compose ps
@@ -29,21 +29,36 @@ docker compose logs -f app
 
 After the initial build, start with `docker compose up -d`. Stop with `docker compose down`; this keeps the `postgres_data` volume. `docker compose down -v` deletes the database volume, including accounts and project history. Back up PostgreSQL together with `APP_SECRET`.
 
-To try a complete workflow, create your account and project, configure GitHub and a model provider, add a document step and a PR step, create a ticket, and start a sprint containing that ticket. Advance with **Next step**, review the generated document, approve when required, then review the PR and mark the ticket Done when its workflow is complete. Use a disposable repository for testing publication.
+To try a complete workflow, create the initial account and first project, configure GitHub and a model provider, add a document step and a PR step, create a ticket, and start a sprint containing that ticket. Advance with **Next step**, review the generated document, approve when required, then review the PR and mark the ticket Done when its workflow is complete. Use a disposable repository for testing publication.
 
 ## Accounts, projects, and people
 
 The first visit presents one-time account setup; no default password is shipped. Complete this before exposing the server to others. Sign in with email and password. Accounts assigned an initial password must change it before accessing projects. Sessions expire after seven days, and changing a password revokes that account's existing sessions.
 
-Any signed-in account that has changed its initial password can create a project and becomes that project's administrator. Each project has its own name, description, permanent ticket prefix, repository, workflow, integrations, and members. Ticket prefixes contain 2–10 letters or numbers, beginning with a letter, and identify tickets such as `AIRA-1`.
+The first account is the protected **system user**. It always has full access and is automatically added to every existing and new project; its project access cannot be removed or reduced. Existing installations promote their original first account without resetting data. The system user and accounts that are administrators of at least one project can create projects; the creator becomes an administrator. Members and accounts without project access cannot create projects; an account without access sees a prompt to ask an administrator to add it to a project. The API enforces these permissions. Accounts must change an assigned initial password before accessing project actions.
 
-Project roles are **admin** and **member**. Membership grants access only to that project. Administrators manage settings, credentials, workflow, people, and sprint creation. Members collaborate on tickets, documents, conversations, approvals, and forward movement. A project must keep at least one administrator.
+Each project has its own name, description, permanent ticket prefix, repository, workflow, integrations, and members. Ticket prefixes contain 2–10 letters or numbers, beginning with a letter, and identify tickets such as `KANG-1`.
 
-In **Config → People**, an administrator can find an existing account by exact email or create a new account with a name and initial password, then assign its project role. Removing a member removes access to that project, rather than deleting their account or history. Invitation email and password-reset email are not available.
+Every project member has **Basic (Sprint, Backlog & Done)** access. This mandatory permission cannot be unchecked, and members remain available as eligible step reviewers. Additional permissions are granted independently for each project:
+
+| Permission | Access |
+| --- | --- |
+| Analytics | View project analytics. |
+| Users — Read | View the full Config → Users page, including the user list and disabled create-user panel; cannot search, add, remove, or change users. |
+| Users — Write | Includes Users Read; search and create users, edit their permissions, and remove project access. |
+| Workflow — Write | Edit Config → Workflow, including reviewer rules while structure is locked. |
+| General — Read / Write | View or edit Config → General: project name, permanent ticket prefix, description, and GitHub connection/repository. |
+| Sandbox & models — Read / Write | View or edit model providers, default model, model credentials, agent sandbox, and concurrency settings. |
+
+Existing administrators retain all permissions and sprint creation. Other members collaborate on tickets, documents, conversations, approvals, and forward movement. Config shows sections allowed by the member's permissions. Write includes Read for the same section. Users Write is required to grant permissions: if the current user has only Read for a section, they can grant only Read; if they have Write, they can grant Read or Write. Existing General Write grants migrate to General Write and Sandbox & models Write so saved access is preserved.
+
+In **Config → Users**, a user with Users Write can find an existing account by exact email or create a new account with a name and initial password, then choose permissions. New users receive mandatory board access by default. A Users Write user can grant only permissions they hold and cannot change or remove someone whose permissions exceed their own. The system user cannot be removed or have its permissions changed. Only the system user sees its own account in user lists or reviewer selectors; other accounts never receive its identity. The system user can select itself as a workflow reviewer. Other users retain those hidden assignments when saving the workflow; approval counts still include approvals from eligible hidden reviewers. Removing a member removes access to that project, rather than deleting their account or history. Invitation email and password-reset email are not available.
+
+The system user and existing administrators automatically have **Analytics** access. In **Config → Users**, users with both Users Write and Analytics can grant or revoke analytics access for members they are allowed to manage. Analytics permission controls visibility for the current project while preserving mandatory Basic access. Reducing an existing administrator's grants converts that account to a member with the selected permissions. Revoked users and nonmembers cannot access the project's analytics API.
 
 ## Project settings and integrations
 
-**Config → General & integrations** contains project details, GitHub connection, model provider/default model, saved credentials, sandbox provider, and concurrent sandbox limit. Settings are project-specific. Only administrators configure them. Saved credentials are encrypted and represented by presence indicators rather than returned in API responses. Leave replacement key fields blank to retain saved values.
+**Config → General** contains project name, permanent ticket prefix, description, and GitHub connection/repository. **Config → Sandbox & models** contains Models & credentials and Agent sandbox, including the concurrent sandbox limit. Settings are project-specific. Each section has independent Read and Write permissions; saves enforce the corresponding Write permission on the server. Saved credentials are encrypted and represented by presence indicators rather than returned in API responses. Leave replacement key fields blank to retain saved values.
 
 ### Model provider: Ollama Cloud or Claude
 
@@ -56,13 +71,13 @@ Choose **Model provider** and save the corresponding API key. New projects defau
 
 The form shows the selected provider's API key field. Switching providers preserves both saved keys, while a run uses only its selected model-provider key. The project **Default model** applies to agent steps that have no model override. Set individual models in **Config → Workflow** when needed. Step overrides must work with the project's selected provider; when switching providers, review both the project default and every step override.
 
-Provider errors or invalid structured agent output fail the run and appear in its logs. AIRA does not substitute simulated output. Ollama's Anthropic-compatible interface supports basic tool calling but not every Anthropic-specific feature or hosted web-search capability; choose models suitable for your workflow and validate them with a small ticket.
+Provider errors or invalid structured agent output fail the run and appear in its logs. Kangentix does not substitute simulated output. Ollama's Anthropic-compatible interface supports basic tool calling but not every Anthropic-specific feature or hosted web-search capability; choose models suitable for your workflow and validate them with a small ticket.
 
 ### GitHub repository and identity
 
 Connect a fine-grained personal access token from a user or dedicated bot account. Grant the selected repositories **Contents: Read and write** and **Pull requests: Read and write**. Changes to GitHub Actions workflows can also require **Workflows: Read and write**. The token identity must have repository write access; organization approval or SSO authorization may apply.
 
-AIRA verifies the token identity and repository access before saving credentials. Load accessible repositories, select `owner/repository`, confirm the **Base branch**, and save settings. The connected identity authors pull requests. This release supports github.com tokens; GitHub App OAuth onboarding, installation-token onboarding, and GitHub Enterprise Server are not implemented.
+Kangentix verifies the token identity and repository access before saving credentials. Load accessible repositories, select `owner/repository`, confirm the **Base branch**, and save settings. The connected identity authors pull requests. This release supports github.com tokens; GitHub App OAuth onboarding, installation-token onboarding, and GitHub Enterprise Server are not implemented.
 
 Every agent request resolves the base branch to an exact commit and receives that repository archive. Agents never receive the GitHub token. The trusted app retrieves snapshots and publishes validated changes through the GitHub API.
 
@@ -74,13 +89,13 @@ All ticket fields are editable only in **Backlog**. Backlog details have **Overv
 
 Attach or remove up to five images while creating or editing a backlog ticket. PNG, JPEG, GIF, and WebP are accepted, up to 2 MiB per image. Images are stored in PostgreSQL and served only to authorized project participants. Ticket Markdown renders authenticated attachments inline; other image URLs appear as links, so merely opening a ticket does not request remote images.
 
-When a ticket enters a sprint, its title, description, priority, and images become read-only. Each agent run receives attachments at `docs/aira/<TicketNumber>/images/<image-id>.<extension>` with file references in its prompt. Published PRs preserve those images with the selected ticket documents.
+When a ticket enters a sprint, its title, description, priority, and images become read-only. Each agent run receives attachments at `docs/kangentix/<TicketNumber>/images/<image-id>.<extension>` with file references in its prompt. Published PRs preserve those images with the selected ticket documents.
 
 ## Sprints and the board
 
-Administrators start a sprint with selected backlog tickets and an optional name. A sprint can start without new backlog tickets. Project members can add more backlog tickets to the active sprint. The board displays one column per configured workflow step, ticket priority, approval progress, queued/running/failed status, cleanup status, and PR links.
+Administrators start a sprint with selected backlog tickets, an optional name, and an optional description of up to 2,000 characters. Use the description for the sprint goal or an end-date note; it is free text rather than a structured date or deadline. A sprint can start without new backlog tickets. Project members can add more backlog tickets to the active sprint. The board displays one column per configured workflow step, ticket priority, approval progress, queued/running/failed status, cleanup status, and PR links.
 
-Starting the next sprint carries unfinished tickets forward at their current steps with documents, discussions, approvals, and run history intact. Completed tickets from the previous sprint move into the **Done** archive.
+Starting the next sprint carries unfinished tickets forward at their current steps with documents, discussions, approvals, and run history intact. Completed tickets already appear in the **Done** archive.
 
 An unfinished ticket can **Move to Backlog** when no agent run is pending or running. This clears its approvals and sprint/step membership while preserving ticket fields, documents, conversations, and run/PR history. Its fields become editable again. Adding it to a sprint later starts it at the first workflow step.
 
@@ -92,12 +107,12 @@ New projects contain only the first **Todo** parking step. Add the remaining sta
 | --- | --- |
 | First parking step | Holds newly admitted sprint tickets. It has no agent model, instructions, or prior-document option. |
 | **Agent step** off | Manual stage, for example In QA or Waiting. No sandbox starts. |
-| **Agent step** on, **Create PR from changes** off | Generates a Markdown document saved in AIRA. The agent can read/search the repository but cannot execute shell commands or change repository files. |
-| **Agent step** on, **Create PR from changes** on | Lets the agent edit code, install dependencies, build, and test within its sandbox. AIRA publishes a verified PR, or records a successful no-change result. |
+| **Agent step** on, **Create PR from changes** off | Generates a Markdown document saved in Kangentix. The agent can read/search the repository but cannot execute shell commands or change repository files. |
+| **Agent step** on, **Create PR from changes** on | Lets the agent edit code, install dependencies, build, and test within its sandbox. Kangentix publishes a verified PR, or records a successful no-change result. |
 
 For added steps, choose a name, eligible reviewers, and required approval count. Agent steps also have instructions, an optional model override, and **Include documents from prior steps**. This setting controls whether earlier ticket documents are included in the agent's context. Documents have stable filenames independent of step display names.
 
-You can add, remove, rename, and reorder later steps while the active sprint is empty or contains only Done tickets. Once unfinished sprint tickets exist, only agent-step **models and instructions** can be changed; the other workflow fields are locked. Those permitted changes preserve approvals and apply to future runs.
+You can add, remove, rename, and reorder later steps while the active sprint is empty or contains only Done tickets. Once unfinished sprint tickets exist, structure stays locked, but users with Workflow Write can still change **eligible reviewers**, **required approvals**, and agent-step **models and instructions**. Changing reviewer rules clears approvals for the affected steps on active tickets so that the new rules must be reviewed. Changes to agent models and instructions preserve approvals and apply to future runs. Done tickets retain their saved workflow and approvals.
 
 Movement within a sprint is forward. **Next step** checks the current step's work and approvals, then moves the ticket. Entering an agent step queues its initial run. Completing a run does not automatically advance a ticket.
 
@@ -117,11 +132,11 @@ Approvals gate leaving the current step. Configure explicitly eligible project p
 
 Without assigned reviewers, any project member can advance after the step's work completes. With reviewers, the required distinct eligible approvals must be present. Manual steps can also require approval.
 
-Document approvals refer to the version the reviewer loaded; PR-step approvals refer to the latest successful run. If the work changed, AIRA rejects the stale approval instead of approving unseen output. Saving/revising a document or rerunning an agent invalidates approvals. Review the new version and approve again.
+Document approvals refer to the version the reviewer loaded; PR-step approvals refer to the latest successful run. If the work changed, Kangentix rejects the stale approval instead of approving unseen output. Saving/revising a document or rerunning an agent invalidates approvals. Review the new version and approve again.
 
 ## Code changes and pull requests
 
-PR steps use a disposable checkout of the captured base commit. The agent receives ticket context and selected documents under `docs/aira/<TicketNumber>/<stable-step-filename>.md`. It runs Claude Code with permission prompts skipped inside the sandbox, allowing file editing, shell commands, dependency installation, builds, and tests.
+PR steps use a disposable checkout of the captured base commit. The agent receives ticket context and selected documents under `docs/kangentix/<TicketNumber>/<stable-step-filename>.md`. It runs Claude Code with permission prompts skipped inside the sandbox, allowing file editing, shell commands, dependency installation, builds, and tests.
 
 The app validates the resulting changed-file payload, creates Git objects and a run-specific branch through GitHub, opens the PR, and verifies its repository, branch, base, expected tree, and base commit parent. Selected saved documents are enforced again at publication so agent edits cannot silently replace the reviewed inputs. The app does not execute agent-produced code or Git configuration on its host.
 
@@ -145,18 +160,30 @@ Queued jobs survive an application restart. Interrupted running jobs fail with a
 
 At the final configured step, use **Mark as Done** after work and approvals are complete. A PR need not be merged to complete the workflow. Done tickets are fully read-only and preserve a workflow snapshot, documents, conversations, approvals, run logs, activity, and PR references.
 
-Completed tickets remain in their final board column during the active sprint. Starting the next sprint moves them to the **Done** archive. Backlog tickets closed as won't do appear in that archive immediately.
+Marking a ticket Done removes it from the active board and moves it to the **Done** archive immediately. Backlog tickets closed as won't do also appear in that archive immediately. Agent completion never advances or completes a ticket automatically.
+
+## Project analytics
+
+Open **Analytics** in the sidebar to review delivery counts and timing metrics for the selected project. The system user and existing administrators have access automatically; other members see this view when granted Analytics permission in **Config → Users**. The API checks current project membership and analytics permission on every request.
+
+Completed delivery counts include tickets marked Done through their workflow; backlog tickets closed as won't do are excluded. Cycle time measures the current work period from sprint entry to Done. Lead time measures ticket creation to Done. Active age measures the time since an unfinished ticket entered its current work period. Carrying a ticket into the next sprint preserves its work-period start; returning it to Backlog resets that start, and a later sprint entry begins a new work period.
+
+Sprint scope counts every admitted ticket, including tickets carried in and tickets added after the sprint starts. Carried-in tickets are counted separately. Completion compares delivered tickets with that scope. A nonempty sprint is complete only when every scoped ticket is delivered while it is active or by its recorded end. An ended sprint's completed and remaining counts use delivery status at its end; carried tickets completed afterward remain unfinished in that earlier sprint's metrics. Sprint elapsed time runs from its start to completion when recorded, otherwise to its end for an ended sprint, or to now for the active sprint. Sprint descriptions are notes and do not define a deadline for these calculations.
+
+Project summary metrics include all relevant tickets. Detail lists show up to the 500 latest delivered tickets and the 500 oldest active tickets; detail filters apply to those bounded lists.
+
+Missing historical timestamps are shown as unavailable and excluded from timing averages. They are not inferred from ticket updates or sprint dates.
 
 ## Docker sandboxes and custom runtimes
 
-Docker is the default sandbox provider. The supplied `aira-sandbox:local` image uses **Node.js 22** with npm, Claude Code, Python, Git, ripgrep, build tools, Electron Linux libraries, fonts, and Xvfb. It is the initial Node-based environment, rather than a complete toolchain for every repository. The runner supplies a virtual display when Xvfb is available. Docker sets `ELECTRON_DISABLE_SANDBOX=1` for Electron's nested Chromium sandbox; outer container isolation remains enabled.
+Docker is the default sandbox provider. The supplied `kangentix-sandbox:local` image uses **Node.js 22** with npm, Claude Code, Python, Git, ripgrep, build tools, Electron Linux libraries, fonts, and Xvfb. It is the initial Node-based environment, rather than a complete toolchain for every repository. The runner supplies a virtual display when Xvfb is available. Docker sets `ELECTRON_DISABLE_SANDBOX=1` for Electron's nested Chromium sandbox; outer container isolation remains enabled.
 
 Each run gets a fresh container with UID 1000, a read-only root filesystem, disposable 2 GiB `/tmp`, all Linux capabilities dropped, no privilege escalation, a 256-process limit, two CPUs, and 4 GiB memory. Agent containers have no application/database mounts, Docker socket, GitHub token, or E2B key. They use Docker's default bridge, outside the private database network, with outbound access for model inference and dependency downloads. Selective public-network egress restrictions are not implemented.
 
-For Java, Python projects needing `uv`, or other runtimes/libraries, build your own image on the same Docker daemon used by AIRA and select its tag in **Config → Agent sandbox → Docker image**. For example, if the repository targets Java 17:
+For Java, Python projects needing `uv`, or other runtimes/libraries, build your own image on the same Docker daemon used by Kangentix and select its tag in **Config → Sandbox & models → Agent sandbox → Docker image**. For example, if the repository targets Java 17:
 
 ```dockerfile
-FROM aira-sandbox:local
+FROM kangentix-sandbox:local
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends openjdk-17-jdk \
     && rm -rf /var/lib/apt/lists/*
@@ -175,11 +202,11 @@ The trusted app mounts the Docker socket to create and remove agent containers. 
 
 ## E2B hosted sandboxes
 
-Select **E2B** in **Config → Agent sandbox** when local Docker execution is not needed. Save an [E2B API key](https://e2b.dev/dashboard) and optionally a prepared template ID.
+Select **E2B** in **Config → Sandbox & models → Agent sandbox** when local Docker execution is not needed. Save an [E2B API key](https://e2b.dev/dashboard) and optionally a prepared template ID.
 
-The default template is `claude`; an empty template field also selects `claude`. A custom template must include `node`, `npm`, `python3`, and `git`, support the non-root `user` account and writable `/tmp`, and provide the runtimes and libraries your repository needs. Preinstall Claude Code for faster startup; AIRA installs it into `/tmp` if it is missing. See [E2B templates](https://docs.e2b.dev/sandbox-template).
+The default template is `claude`; an empty template field also selects `claude`. A custom template must include `node`, `npm`, `python3`, and `git`, support the non-root `user` account and writable `/tmp`, and provide the runtimes and libraries your repository needs. Preinstall Claude Code for faster startup; Kangentix installs it into `/tmp` if it is missing. See [E2B templates](https://docs.e2b.dev/sandbox-template).
 
-AIRA uploads the snapshot and ticket context, runs the same harness, retrieves bounded results, and kills the sandbox during cleanup. E2B receives repository source and the selected model credential, but not GitHub, database, or application secrets. E2B charges and quotas apply; each response uses a fresh sandbox.
+Kangentix uploads the snapshot and ticket context, runs the same harness, retrieves bounded results, and kills the sandbox during cleanup. E2B receives repository source and the selected model credential, but not GitHub, database, or application secrets. E2B charges and quotas apply; each response uses a fresh sandbox.
 
 Compose still builds the Docker sandbox image by default. For an E2B-only installation, remove the app's Docker socket mount, its `sandbox-image` dependency, and the `sandbox-image` service from your deployment configuration. Docker can still host the app and database while E2B executes the agents.
 
@@ -208,11 +235,13 @@ Oversized or unsupported inputs fail explicitly. An application concurrency sett
 
 Choose **Light** or **Dark** under **Appearance** in the sidebar or sign-in screen. Dark is the default. The selection persists in browser local storage across reloads/sign-ins and is shared with tabs on the same origin. It is not an account or project setting and does not follow you to another browser.
 
+On desktop, collapse or expand the sidebar to adjust the space available for the board. This preference persists in session storage for the current browser tab session. On mobile, navigation remains a drawer opened from the menu control.
+
 ## Deployment, data, and security
 
 Run **one application instance** with PostgreSQL; a database advisory lock prevents a second worker. Queue state and bounded logs have dedicated durable storage. Tickets, artifacts, conversations, approvals, and audits persist in operational tables; account/project settings and credentials are retained separately. Horizontal workers and streaming log subscriptions are not available.
 
-For shared use, put AIRA behind HTTPS and set `APP_URL` to the exact public origin without a path or query. HTTPS enables Secure session cookies; `COOKIE_SECURE=true` can force them. API writes require JSON and reject conflicting origin/cross-site metadata. Enable `TRUST_PROXY=true` only behind one trusted reverse proxy that replaces incoming forwarding headers, with the app port inaccessible directly. Keep `.env` private and retain database/encryption-key backups.
+For shared use, put Kangentix behind HTTPS and set `APP_URL` to the exact public origin without a path or query. HTTPS enables Secure session cookies; `COOKIE_SECURE=true` can force them. API writes require JSON and reject conflicting origin/cross-site metadata. Enable `TRUST_PROXY=true` only behind one trusted reverse proxy that replaces incoming forwarding headers, with the app port inaccessible directly. Keep `.env` private and retain database/encryption-key backups.
 
 Treat repositories, instructions, participants, and custom images as trusted. Implementation code can execute commands and use outbound networking inside its sandbox. The selected model credential must be available there for inference and could be misused by untrusted code. GitHub write credentials remain in the app. Source/prompts are sent to the chosen model service; selecting E2B also sends source to E2B. Docker socket access belongs only to the trusted app.
 
@@ -225,7 +254,7 @@ npm ci
 npm run dev
 ```
 
-Vite serves the UI on port 5173 and proxies API calls to the backend on port 3000. For Docker agent runs, build `aira-sandbox:local` using `sandbox/Dockerfile`. Build and run production with `npm run build` and `npm start`.
+Vite serves the UI on port 5173 and proxies API calls to the backend on port 3000. For Docker agent runs, build `kangentix-sandbox:local` using `sandbox/Dockerfile`. Build and run production with `npm run build` and `npm start`.
 
 ```sh
 npm test
@@ -233,10 +262,10 @@ npm run typecheck
 npm run build
 ```
 
-The complete test command requires Python 3.10+ and Git in addition to Node.js. Select one suite with `npm run test:node` or `npm run test:python`. PostgreSQL integration tests are skipped unless an isolated disposable `AIRA_TEST_DATABASE_URL` is supplied. Set `DATABASE_URL` to that same database before application modules are imported:
+The complete test command requires Python 3.10+ and Git in addition to Node.js. Select one suite with `npm run test:node` or `npm run test:python`. PostgreSQL integration tests are skipped unless an isolated disposable `KANGENTIX_TEST_DATABASE_URL` is supplied. Set `DATABASE_URL` to that same database before application modules are imported:
 
 ```sh
-DATABASE_URL="$AIRA_TEST_DATABASE_URL" npm test
+DATABASE_URL="$KANGENTIX_TEST_DATABASE_URL" npm test
 ```
 
 Automated coverage includes workflow and approval rules, project authorization, ticket images, scheduling and concurrency, persistence/recovery, preparation/cancellation, GitHub result validation, sandbox contracts/path safety, client polling/settings, and log bounds/redaction. Live provider execution, model behavior, GitHub permissions, and infrastructure capacity still need testing with suitable credentials and disposable repositories.

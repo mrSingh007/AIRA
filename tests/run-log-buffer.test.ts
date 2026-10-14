@@ -17,7 +17,7 @@ test("outage buffers stay bounded across 64 runs and preserve unacknowledged app
       if (!rows.has(values[0])) rows.set(values[0], { tail: "", last_sequence: 0, sealed: false, version: 0 });
     } else if (sql.startsWith("SELECT")) {
       return { rows: [rows.get(values[0])], rowCount: 1 };
-    } else if (sql.startsWith("UPDATE aira_run_logs AS l")) {
+    } else if (sql.startsWith("UPDATE kangentix_run_logs AS l")) {
       if (unavailable) { failedBatches.push(values[0]); throw new Error("Database unavailable"); }
       acknowledgedBatches.push(values[0]);
       for (const record of JSON.parse(values[0])) {

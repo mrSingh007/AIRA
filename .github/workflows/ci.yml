@@ -19,20 +19,20 @@ jobs:
       postgres:
         image: postgres:17-alpine
         env:
-          POSTGRES_USER: aira_test
-          POSTGRES_PASSWORD: aira_ci_test
-          POSTGRES_DB: aira_test
+          POSTGRES_USER: kangentix_test
+          POSTGRES_PASSWORD: kangentix_ci_test
+          POSTGRES_DB: kangentix_test
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U aira_test -d aira_test"
+          --health-cmd "pg_isready -U kangentix_test -d kangentix_test"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
 
     env:
-      DATABASE_URL: postgresql://aira_test:aira_ci_test@127.0.0.1:5432/aira_test
-      AIRA_TEST_DATABASE_URL: postgresql://aira_test:aira_ci_test@127.0.0.1:5432/aira_test
+      DATABASE_URL: postgresql://kangentix_test:kangentix_ci_test@127.0.0.1:5432/kangentix_test
+      KANGENTIX_TEST_DATABASE_URL: postgresql://kangentix_test:kangentix_ci_test@127.0.0.1:5432/kangentix_test
 
     steps:
       - name: Check out repository
@@ -57,8 +57,8 @@ jobs:
       - name: Run all tests
         env:
           # Shared hosted runners use a 5s guardrail; local tests default to 1s.
-          AIRA_LOAD_MAX_P95_MS: '5000'
-          AIRA_LOAD_REPORT: ${{ runner.temp }}/aira-load-report.json
+          KANGENTIX_LOAD_MAX_P95_MS: '5000'
+          KANGENTIX_LOAD_REPORT: ${{ runner.temp }}/kangentix-load-report.json
         run: npm test
 
       - name: Build application and check types

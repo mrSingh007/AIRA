@@ -4,7 +4,7 @@ import { attachmentInput, attachmentPath, MAX_IMAGE_BYTES, replaceAttachments } 
 import { ApiError, emptyState } from "../src/server/state.js";
 import type { Ticket, TicketAttachment, TicketAttachmentInput } from "../src/shared/types.js";
 
-const ticket = (): Ticket => ({ id: "ticket", projectId: "project", number: "AIRA-1", title: "Images", description: "", attachments: [], workflowSnapshot: null, priority: "medium", status: "backlog", stepId: null, sprintId: null, createdBy: "user", createdAt: "", updatedAt: "", closedAt: null, pullRequests: [] });
+const ticket = (): Ticket => ({ id: "ticket", projectId: "project", number: "KANGENTIX-1", title: "Images", description: "", attachments: [], workflowSnapshot: null, priority: "medium", status: "backlog", stepId: null, sprintId: null, createdBy: "user", createdAt: "", updatedAt: "", closedAt: null, pullRequests: [] });
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=", "base64");
 const upload = (bytes = png): Extract<TicketAttachmentInput, { data: string }> => ({ filename: "image.png", contentType: "image/png", data: bytes.toString("base64") });
 const badRequest = (error: unknown) => error instanceof ApiError && error.status === 400;
@@ -32,7 +32,7 @@ test("all supported image signatures can be stored and receive stable typed path
     const attachment = current.attachments[0];
     assert.equal(attachment.size, bytes.length);
     assert.equal(state.attachmentData[attachment.id], bytes.toString("base64"));
-    assert.equal(attachmentPath(current.number, attachment), `docs/aira/AIRA-1/images/${attachment.id}.${extension}`);
+    assert.equal(attachmentPath(current.number, attachment), `docs/kangentix/KANGENTIX-1/images/${attachment.id}.${extension}`);
   }
 });
 
@@ -92,6 +92,6 @@ test("images are editable only outside sprints in backlog and paths cannot escap
     assert.throws(() => replaceAttachments(state, current, []), (error: unknown) => error instanceof ApiError && error.status === 409);
   }
   const attachment: TicketAttachment = { id: "00000000-0000-4000-8000-000000000000", filename: "ignored.png", contentType: "image/png", size: 1 };
-  for (const number of ["../AIRA", "AIRA/1", "AIRA_1", ""]) assert.throws(() => attachmentPath(number, attachment), badRequest);
-  assert.throws(() => attachmentPath("AIRA-1", { ...attachment, id: "../../escape" }), badRequest);
+  for (const number of ["../KANGENTIX", "KANGENTIX/1", "KANGENTIX_1", ""]) assert.throws(() => attachmentPath(number, attachment), badRequest);
+  assert.throws(() => attachmentPath("KANGENTIX-1", { ...attachment, id: "../../escape" }), badRequest);
 });

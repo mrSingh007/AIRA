@@ -40,7 +40,7 @@ function configData(sandboxProvider: SandboxProvider = "docker", modelProvider: 
       project: {
         id: "project", name: "Project", key: "PROJ", description: "", repository: "", baseBranch: "main",
         model: "model", modelProvider, sandboxProvider, dockerImage: "image", e2bTemplate: "template",
-        maxConcurrentRuns: 101, steps: [], roles: { admin: "admin" }, githubConnected: false,
+        maxConcurrentRuns: 101, steps: [], roles: { member: "member" }, memberPermissions: { member: ["sandboxWrite"] }, githubConnected: false,
         githubIdentity: "", hasOllamaKey: false, hasClaudeKey: false, hasE2bKey: false,
       },
       members: [], sprints: [], tickets: [], artifacts: [], approvals: [], threads: [], messages: [],
@@ -49,7 +49,7 @@ function configData(sandboxProvider: SandboxProvider = "docker", modelProvider: 
 }
 
 function renderConfig(data: ProjectData) {
-  return renderToStaticMarkup(<Config data={data} userId="admin" refresh={async () => {}} notify={() => {}} setError={() => {}} />);
+  return renderToStaticMarkup(<Config data={data} userId="member" refresh={async () => {}} notify={() => {}} setError={() => {}} />);
 }
 
 for (const sandboxProvider of ["docker", "e2b"] as const) {

@@ -56,7 +56,7 @@ function detachClaimValue(value: any): any {
 }
 export async function claimAvailableRuns(): Promise<Claim[]> {
   // Idle polls need neither a full workflow snapshot clone nor the state lock.
-  const eligible = await pool.query("SELECT 1 FROM aira_runs WHERE status='pending' AND eligible_at <= now() LIMIT 1");
+  const eligible = await pool.query("SELECT 1 FROM kangentix_runs WHERE status='pending' AND eligible_at <= now() LIMIT 1");
   if (!eligible.rowCount) return [];
   let nextCursor = cursor;
   let staged: Claim[] = [];
@@ -88,7 +88,7 @@ export async function claimAvailableRuns(): Promise<Claim[]> {
         run.status = "failed"; run.error = "The ticket or workflow changed before this run could start.";
         run.finishedAt = now();
         await updateRun(run, client);
-        await client.query("UPDATE aira_run_logs SET sealed=true,version=version+1 WHERE run_id=$1", [run.id]);
+        await client.query("UPDATE kangentix_run_logs SET sealed=true,version=version+1 WHERE run_id=$1", [run.id]);
         continue;
       }
       if (!await claimRun(run.id, project.sandboxProvider, client)) continue;
@@ -104,7 +104,7 @@ export async function claimAvailableRuns(): Promise<Claim[]> {
         run.status = "failed"; run.finishedAt = now(); run.error = "Project credentials could not be decrypted; update project configuration.";
         await updateRun(run, client);
         await setLifecycle(run.id, { reservationHeld: false, phase: "settled" }, client);
-        await client.query("UPDATE aira_run_logs SET sealed=true,version=version+1 WHERE run_id=$1", [run.id]);
+        await client.query("UPDATE kangentix_run_logs SET sealed=true,version=version+1 WHERE run_id=$1", [run.id]);
         continue;
       }
       result.push({ run, ticket, step, project: await publicProject(project, client), credentials,
@@ -123,7 +123,7 @@ export async function claimAvailableRuns(): Promise<Claim[]> {
     if (!staged.length) throw error;
     claims = [];
     await retryPersistence(async () => {
-      const persisted = await pool.query("SELECT id,status,phase,project_id,provider FROM aira_runs WHERE id=ANY($1::text[]) FOR UPDATE", [staged.map(claim => claim.run.id)]);
+      const persisted = await pool.query("SELECT id,status,phase,project_id,provider FROM kangentix_runs WHERE id=ANY($1::text[]) FOR UPDATE", [staged.map(claim => claim.run.id)]);
       const byId = new Map(persisted.rows.map(row => [row.id,row]));
       claims = staged.filter(claim => {
         const row = byId.get(claim.run.id);
@@ -239,7 +239,7 @@ async function runClaim(claim: Claim, record: ActiveRun) {
         // unreserved terminal run with a log stream that never becomes sealed.
         await mutate(async (_state, client) => {
           await setLifecycle(claim.run.id, { reservationHeld: false, phase: "settled", sandboxId: null, cleanupCredential: null, nextCleanupAt: null }, client);
-          await client.query("UPDATE aira_run_logs SET sealed=true,version=version+1 WHERE run_id=$1 AND NOT sealed", [claim.run.id]);
+          await client.query("UPDATE kangentix_run_logs SET sealed=true,version=version+1 WHERE run_id=$1 AND NOT sealed", [claim.run.id]);
         });
         await log.seal();
       }
@@ -274,7 +274,7 @@ async function reconcileCleanupRecords(startup = false) {
         await log.flush();
         await mutate(async (_state, client) => {
           await setLifecycle(run.id, { reservationHeld: false, phase: "settled", sandboxId: null, cleanupCredential: null, nextCleanupAt: null }, client);
-          await client.query("UPDATE aira_run_logs SET sealed=true,version=version+1 WHERE run_id=$1 AND NOT sealed", [run.id]);
+          await client.query("UPDATE kangentix_run_logs SET sealed=true,version=version+1 WHERE run_id=$1 AND NOT sealed", [run.id]);
         });
         await log.seal();
       } else throw new Error("Resource creation was uncertain; awaiting ownership discovery or lifetime expiry.");

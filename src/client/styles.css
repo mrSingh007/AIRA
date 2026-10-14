@@ -442,33 +442,11 @@ fieldset:disabled {
   letter-spacing: 0.02em;
   color: var(--theme-text, #f3f0e6);
 }
-.brand-dot {
-  color: var(--theme-accent-text, #91d9c5);
-}
 .brand-mark {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 27px;
-  height: 30px;
-  transform: skewY(-15deg);
-  gap: 3px;
-}
-.brand-mark i {
-  width: 6px;
-  background: var(--accent);
-  border-radius: 1px;
   display: block;
-}
-.brand-mark i:nth-child(1) {
-  height: 14px;
-}
-.brand-mark i:nth-child(2) {
-  height: 24px;
-}
-.brand-mark i:nth-child(3) {
-  height: 18px;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
 }
 /* Entry and onboarding */
 .boot {
@@ -623,6 +601,9 @@ fieldset:disabled {
 .onboarding-card > .brand {
   margin-bottom: 40px;
 }
+.onboarding-card.project-onboarding > .brand {
+  margin-bottom: 24px;
+}
 .onboarding-card > .section-icon {
   display: flex;
   align-items: center;
@@ -671,7 +652,7 @@ fieldset:disabled {
   align-items: center;
 }
 .sidebar-brand .brand {
-  font-size: 24px;
+  font-size: 21px;
 }
 .project-switcher {
   margin: 0 17px 28px;
@@ -4060,4 +4041,196 @@ input[type="radio"] {
   min-height: 0;
   max-height: none;
   border: 0;
+}
+
+/* Compact desktop navigation keeps the board available while retaining every action. */
+.project-switcher-compact {
+  display: none;
+}
+.sprint-description {
+  color: var(--theme-secondary, #98a8af);
+  font-size: 12px;
+  line-height: 1.6;
+  max-width: 660px;
+  margin: 5px 0;
+  overflow-wrap: anywhere;
+}
+@media (min-width: 701px) {
+  .sidebar-is-collapsed .sidebar {
+    width: 72px;
+  }
+  .sidebar-is-collapsed .main-area {
+    margin-left: 72px;
+    width: calc(100% - 72px);
+  }
+  .sidebar-is-collapsed .sidebar-brand {
+    padding: 28px 20px 24px;
+    justify-content: center;
+  }
+  .sidebar-is-collapsed .brand > span,
+  .sidebar-is-collapsed .project-switcher,
+  .sidebar-is-collapsed .nav-label,
+  .sidebar-is-collapsed .nav-item > span,
+  .sidebar-is-collapsed .sidebar-note,
+  .sidebar-is-collapsed .user-row > div,
+  .sidebar-is-collapsed .theme-label {
+    display: none;
+  }
+  .sidebar-is-collapsed .project-switcher-compact {
+    display: flex;
+    margin: 0 auto 24px;
+  }
+  .sidebar-is-collapsed .sidebar nav,
+  .sidebar-is-collapsed .sidebar-lower {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+  .sidebar-is-collapsed .nav-item {
+    justify-content: center;
+    padding: 12px;
+  }
+  .sidebar-is-collapsed .nav-item.active:before {
+    left: -10px;
+  }
+  .sidebar-is-collapsed .theme-control {
+    margin: 0 0 12px;
+  }
+  .sidebar-is-collapsed .theme-options {
+    flex-direction: column;
+  }
+  .sidebar-is-collapsed .theme-options button {
+    font-size: 0;
+    gap: 0;
+    padding: 8px;
+  }
+  .sidebar-is-collapsed .user-row {
+    flex-direction: column;
+    gap: 14px;
+    padding: 16px 0;
+  }
+}
+@media (max-width: 700px) {
+  .sidebar-toggle {
+    display: none;
+  }
+}
+
+/* Feature permissions use a separate row so member identity remains readable. */
+.permission-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.permission-options .permission-option {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid var(--theme-border, #30434b);
+  border-radius: 7px;
+  background: var(--theme-input, #111f27);
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.16s, background 0.16s;
+}
+.permission-options .permission-option:has(input:checked) {
+  background: var(--theme-accent-bg, #22382f);
+  border-color: var(--theme-accent-border, #3a5047);
+}
+.permission-options .permission-option:hover:has(input:enabled) {
+  border-color: var(--theme-border-focus, #76ad9e);
+}
+.permission-options .permission-option:has(input:disabled) {
+  cursor: default;
+}
+.permission-options .permission-basic,
+.permission-options .permission-analytics {
+  grid-column: 1 / -1;
+}
+.permission-required {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--theme-secondary, #839faa);
+  font-size: 9px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+.permission-options input[type="checkbox"] {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  place-content: center;
+  border: 1px solid var(--theme-secondary, #839faa);
+  border-radius: 4px;
+  background: var(--theme-input, #111f27);
+  cursor: inherit;
+}
+.permission-options input[type="checkbox"]:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.permission-options input[type="checkbox"]:checked::before {
+  content: "";
+  width: 8px;
+  height: 5px;
+  border-left: 2px solid var(--bg);
+  border-bottom: 2px solid var(--bg);
+  transform: translateY(-1px) rotate(-45deg);
+}
+.permission-options input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.permission-options input[type="checkbox"]:disabled {
+  opacity: 0.7;
+}
+.member-row {
+  flex-wrap: wrap;
+}
+.member-row > .permission-options {
+  flex: 0 0 100%;
+  order: 1;
+  padding-top: 8px;
+}
+.people-layout.people-readonly {
+  grid-template-columns: 1fr;
+}
+@media (max-width: 600px) {
+  .permission-options {
+    grid-template-columns: 1fr;
+  }
+}
+
+.config-panel-fieldset {
+  border: 0;
+  margin: 0;
+  min-width: 0;
+}
+.config-panel-fieldset:disabled input,
+.config-panel-fieldset:disabled textarea,
+.config-panel-fieldset:disabled select,
+.config-panel-fieldset:disabled button {
+  cursor: default;
+  opacity: 0.65;
+}
+.config-panel-fieldset > .config-section + .config-section {
+  margin-top: 23px;
+}
+
+.config-panel-fieldset:not(.config-fields) {
+  padding: 0;
+}
+.config-tabs {
+  overflow-x: auto;
 }

@@ -1,11 +1,11 @@
 import pg from "pg";
 import { createDraft, current, finishDraft, isDraft, setAutoFreeze, type Draft } from "immer";
 setAutoFreeze(false);
-import { emptyState, type State } from "./state.js";
+import { emptyState, ensureSystemUser, type State } from "./state.js";
 
 export const pool = new pg.Pool({
   connectionString:
-    process.env.DATABASE_URL || "postgres://aira:aira@localhost:5432/aira",
+    process.env.DATABASE_URL || "postgres://kangentix:kangentix@localhost:5432/kangentix",
   max: 8,
   connectionTimeoutMillis: 5000,
 });
@@ -14,19 +14,19 @@ export type DatabaseClient = Pick<pg.PoolClient, "query">;
 export const query = pool.query.bind(pool);
 export async function initializeDatabase() {
   await pool.query(
-    "CREATE TABLE IF NOT EXISTS aira_state (id integer PRIMARY KEY CHECK (id = 1), document jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())",
+    "CREATE TABLE IF NOT EXISTS kangentix_state (id integer PRIMARY KEY CHECK (id = 1), document jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())",
   );
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS aira_records (
+    CREATE TABLE IF NOT EXISTS kangentix_records (
       kind text NOT NULL, record_id text NOT NULL, project_id text NOT NULL,
       position integer NOT NULL, document jsonb NOT NULL,
       PRIMARY KEY(kind,record_id)
     );
-    CREATE INDEX IF NOT EXISTS aira_records_project ON aira_records(project_id,kind,position);
-    CREATE TABLE IF NOT EXISTS aira_project_agent_settings (
+    CREATE INDEX IF NOT EXISTS kangentix_records_project ON kangentix_records(project_id,kind,position);
+    CREATE TABLE IF NOT EXISTS kangentix_project_agent_settings (
       project_id text PRIMARY KEY, max_concurrent_runs integer NOT NULL CHECK(max_concurrent_runs > 0)
     );
-    CREATE TABLE IF NOT EXISTS aira_runs (
+    CREATE TABLE IF NOT EXISTS kangentix_runs (
       id text PRIMARY KEY, project_id text NOT NULL, ticket_id text NOT NULL,
       status text NOT NULL CHECK(status IN ('pending','running','completed','failed')),
       created_at timestamptz NOT NULL, started_at timestamptz, finished_at timestamptz,
@@ -36,18 +36,18 @@ export async function initializeDatabase() {
       cleanup_credential text, cleanup_attempts integer NOT NULL DEFAULT 0,
       next_cleanup_at timestamptz, expires_at timestamptz
     );
-    CREATE UNIQUE INDEX IF NOT EXISTS aira_runs_ticket_busy ON aira_runs(ticket_id) WHERE status IN ('pending','running');
-    CREATE INDEX IF NOT EXISTS aira_runs_queue ON aira_runs(project_id,status,eligible_at,created_at,id);
-    CREATE INDEX IF NOT EXISTS aira_runs_ticket_history ON aira_runs(ticket_id,created_at DESC,id DESC);
-    CREATE INDEX IF NOT EXISTS aira_runs_reservations ON aira_runs(project_id,next_cleanup_at) WHERE reservation_held;
-    CREATE TABLE IF NOT EXISTS aira_run_logs (
-      run_id text PRIMARY KEY REFERENCES aira_runs(id) ON DELETE CASCADE,
+    CREATE UNIQUE INDEX IF NOT EXISTS kangentix_runs_ticket_busy ON kangentix_runs(ticket_id) WHERE status IN ('pending','running');
+    CREATE INDEX IF NOT EXISTS kangentix_runs_queue ON kangentix_runs(project_id,status,eligible_at,created_at,id);
+    CREATE INDEX IF NOT EXISTS kangentix_runs_ticket_history ON kangentix_runs(ticket_id,created_at DESC,id DESC);
+    CREATE INDEX IF NOT EXISTS kangentix_runs_reservations ON kangentix_runs(project_id,next_cleanup_at) WHERE reservation_held;
+    CREATE TABLE IF NOT EXISTS kangentix_run_logs (
+      run_id text PRIMARY KEY REFERENCES kangentix_runs(id) ON DELETE CASCADE,
       tail text NOT NULL DEFAULT '', version bigint NOT NULL DEFAULT 0,
       last_sequence bigint NOT NULL DEFAULT 0, sealed boolean NOT NULL DEFAULT false
     );
   `);
   await pool.query(
-    "INSERT INTO aira_state (id, document) VALUES (1, $1::jsonb) ON CONFLICT (id) DO NOTHING",
+    "INSERT INTO kangentix_state (id, document) VALUES (1, $1::jsonb) ON CONFLICT (id) DO NOTHING",
     [JSON.stringify({users:[],projects:[],sessions:[]})],
   );
 }
@@ -65,6 +65,7 @@ function hydrate(core: Partial<State>, rows: Array<{kind:string;record_id:string
     if (row.kind === "attachmentData") state.attachmentData[row.record_id] = row.document;
     else if ((operationalKeys as readonly string[]).includes(row.kind)) (state[row.kind as typeof operationalKeys[number]] as any[]).push(row.document);
   }
+  ensureSystemUser(state);
   return state;
 }
 /** Committed snapshots are read-only by convention. Only mutate creates a writable copy. */
@@ -76,8 +77,8 @@ export async function readState(): Promise<State> {
       await client.query("BEGIN");
       // Cache recovery must wait for any original transaction whose COMMIT
       // acknowledgement was lost, then hydrate both stores from one boundary.
-      const core = await client.query(`SELECT ${coreSelection} FROM aira_state WHERE id=1 FOR UPDATE`);
-      const records = await client.query("SELECT kind,record_id,document FROM aira_records ORDER BY kind,position,record_id");
+      const core = await client.query(`SELECT ${coreSelection} FROM kangentix_state WHERE id=1 FOR UPDATE`);
+      const records = await client.query("SELECT kind,record_id,document FROM kangentix_records ORDER BY kind,position,record_id");
       const snapshot = hydrate(core.rows[0].document, records.rows);
       const operational = recordsFor(snapshot);
       await client.query("COMMIT");
@@ -163,7 +164,7 @@ export async function mutate<T>(fn: (state: State, client: DatabaseClient) => T 
     databaseTiming.poolWaitMs += performance.now() - poolStart;
     // Every state + queue transaction keeps the canonical lock order even when
     // reading the committed in-process snapshot permitted by the single instance.
-    await client.query("BEGIN; SELECT id FROM aira_state WHERE id=1 FOR UPDATE");
+    await client.query("BEGIN; SELECT id FROM kangentix_state WHERE id=1 FOR UPDATE");
     const callbackStarted = performance.now();
     const value = detachResult(await fn(state, client));
     databaseTiming.callbackMs += performance.now() - callbackStarted;
@@ -172,7 +173,7 @@ export async function mutate<T>(fn: (state: State, client: DatabaseClient) => T 
     if (committed.users !== previous.users || committed.projects !== previous.projects || committed.sessions !== previous.sessions) {
       const core = JSON.stringify({users:committed.users,projects:committed.projects,sessions:committed.sessions});
       const oldCore = JSON.stringify({users:previous.users,projects:previous.projects,sessions:previous.sessions});
-      if (core !== oldCore) await client.query("UPDATE aira_state SET document=document || $1::jsonb,updated_at=now() WHERE id=1",[core]);
+      if (core !== oldCore) await client.query("UPDATE kangentix_state SET document=document || $1::jsonb,updated_at=now() WHERE id=1",[core]);
     }
     const diffStarted = performance.now();
     const after = committed === previous ? before : recordsFor(committed, before);
@@ -185,10 +186,10 @@ export async function mutate<T>(fn: (state: State, client: DatabaseClient) => T 
     }
     for (const [key,record] of before) if (!after.has(key)) removed.push({kind:record.kind,id:record.id});
     databaseTiming.recordDiffMs += performance.now() - diffStarted;
-    if (changed.length) await client.query(`INSERT INTO aira_records(kind,record_id,project_id,position,document)
+    if (changed.length) await client.query(`INSERT INTO kangentix_records(kind,record_id,project_id,position,document)
       SELECT kind,id,project_id,position,document FROM jsonb_to_recordset($1::jsonb) AS r(kind text,id text,project_id text,position integer,document jsonb)
       ON CONFLICT(kind,record_id) DO UPDATE SET project_id=EXCLUDED.project_id,position=EXCLUDED.position,document=EXCLUDED.document`,[JSON.stringify(changed)]);
-    if (removed.length) await client.query(`DELETE FROM aira_records existing USING jsonb_to_recordset($1::jsonb) AS removed(kind text,id text) WHERE existing.kind=removed.kind AND existing.record_id=removed.id`,[JSON.stringify(removed)]);
+    if (removed.length) await client.query(`DELETE FROM kangentix_records existing USING jsonb_to_recordset($1::jsonb) AS removed(kind text,id text) WHERE existing.kind=removed.kind AND existing.record_id=removed.id`,[JSON.stringify(removed)]);
     const commitStarted = performance.now();
     await client.query("COMMIT");
     databaseTiming.commitMs += performance.now() - commitStarted;
@@ -222,7 +223,7 @@ export async function acquireWorkerLock() {
   if (!result.rows[0].locked) {
     client.release();
     throw new Error(
-      "Another AIRA server is active for this database. Run one application instance.",
+      "Another Kangentix server is active for this database. Run one application instance.",
     );
   }
   client.on("error", () => {

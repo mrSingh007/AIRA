@@ -1,4 +1,4 @@
-// getRandomValues also works when AIRA is accessed over HTTP on a LAN.
+// getRandomValues also works when Kangentix is accessed over HTTP on a LAN.
 export function randomId(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   bytes[6] = (bytes[6] & 0x0f) | 0x40;

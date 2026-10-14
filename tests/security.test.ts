@@ -48,7 +48,7 @@ test("encrypted credentials round-trip Unicode with unique nonces and reject tam
 });
 
 test("sessions retain at most ten active sessions per user and use secure cookie options", (t) => {
-  configure(t, "https://aira.example.com");
+  configure(t, "https://kangentix.example.com");
   const state = emptyState();
   state.sessions = [
     { userId: "other", tokenHash: "other", expiresAt: expiresAt(60_000) },
@@ -57,7 +57,7 @@ test("sessions retain at most ten active sessions per user and use secure cookie
   ];
   let issuedToken = "";
   const res = { cookie(name: string, token: string, options: object) {
-    assert.equal(name, "aira_session"); issuedToken = token;
+    assert.equal(name, "kangentix_session"); issuedToken = token;
     assert.deepEqual(options, { httpOnly: true, sameSite: "lax", secure: true, path: "/", maxAge: 604_800_000 });
   } } as Response;
   issueSession(state, request(), res, "user");
@@ -76,12 +76,12 @@ test("authentication requires a live session and blocks initial-password users e
   const user = { id: "user", name: "User", email: "user@example.com", passwordHash: "hash", mustChangePassword: true };
   state.users.push(user);
   state.sessions.push({ userId: user.id, tokenHash: hashToken(token), expiresAt: expiresAt(60_000) });
-  const req = request({ cookies: { aira_session: token } });
+  const req = request({ cookies: { kangentix_session: token } });
   assert.throws(() => authenticate(state, req), (error: unknown) => error instanceof ApiError && error.status === 403);
   assert.equal(authenticate(state, req, true), user);
   user.mustChangePassword = false;
   assert.equal(authenticate(state, req), user);
-  for (const cookies of [{}, { aira_session: 123 }, { aira_session: "short" }, { aira_session: "b".repeat(64) }]) {
+  for (const cookies of [{}, { kangentix_session: 123 }, { kangentix_session: "short" }, { kangentix_session: "b".repeat(64) }]) {
     assert.throws(() => authenticate(state, request({ cookies })), (error: unknown) => error instanceof ApiError && error.status === 401);
   }
   state.sessions[0].expiresAt = expiresAt(-60_000);
@@ -94,10 +94,10 @@ test("logout removes only the presented session and clears a matching cookie", (
   const token = "a".repeat(64);
   state.sessions = [token, "b".repeat(64)].map((value) => ({ userId: "user", tokenHash: hashToken(value), expiresAt: expiresAt(60_000) }));
   const cleared: unknown[] = [];
-  clearSession(state, request({ cookies: { aira_session: token } }), { clearCookie: (...args: unknown[]) => cleared.push(args) } as unknown as Response);
+  clearSession(state, request({ cookies: { kangentix_session: token } }), { clearCookie: (...args: unknown[]) => cleared.push(args) } as unknown as Response);
   assert.equal(state.sessions.length, 1);
   assert.equal(state.sessions[0].tokenHash, hashToken("b".repeat(64)));
-  assert.deepEqual(cleared, [["aira_session", { httpOnly: true, sameSite: "lax", secure: false, path: "/" }]]);
+  assert.deepEqual(cleared, [["kangentix_session", { httpOnly: true, sameSite: "lax", secure: false, path: "/" }]]);
 });
 
 test("origin protection permits safe reads and same-origin JSON writes but rejects cross-site writes", (t) => {

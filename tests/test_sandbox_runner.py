@@ -21,7 +21,7 @@ spec.loader.exec_module(runner)
 
 class SandboxRunnerTests(unittest.TestCase):
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory(prefix='aira-runner-test-')
+        temporary = tempfile.TemporaryDirectory(prefix='kangentix-runner-test-')
         self.addCleanup(temporary.cleanup)
         self.root = pathlib.Path(temporary.name).resolve()
         self.repo = self.root / 'repo'
@@ -79,6 +79,7 @@ class SandboxRunnerTests(unittest.TestCase):
                 env = child.call_args.kwargs['env']
                 key_name = 'ANTHROPIC_API_KEY' if provider == 'claude' else 'ANTHROPIC_AUTH_TOKEN'
                 self.assertEqual(env[key_name], 'selected-secret')
+                self.assertEqual(env['CLAUDE_CONFIG_DIR'], '/tmp/kangentix-claude')
                 for name in inherited:
                     if name == key_name:
                         continue
@@ -168,6 +169,7 @@ print(json.dumps({'type': 'result', 'result': json.dumps({'reply': 'Done'})}))
         self.assertEqual((self.repo / 'docs/definition.md').read_text(), 'definition')
         self.assertEqual((self.repo / 'images/a.png').read_bytes(), b'image')
         self.assertEqual(runner.git('show', 'HEAD:README.md'), b'base')
+        self.assertEqual(runner.git('log', '-1', '--format=%an <%ae>').strip(), b'Kangentix <kangentix@localhost>')
         self.assertNotIn(b'docs/definition.md', runner.git('ls-tree', '-r', 'HEAD'))
 
     def test_prepare_rejects_document_writes_to_symlinks(self):

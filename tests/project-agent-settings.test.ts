@@ -29,7 +29,7 @@ test("invalid concurrency values are rejected before database writes", async () 
 
 test("concurrency writes parameterize the project and accept integer storage boundaries", async () => {
   const db = database([]);
-  const projectId = "project'; DROP TABLE aira_project_agent_settings; --";
+  const projectId = "project'; DROP TABLE kangentix_project_agent_settings; --";
   for (const value of [1, 100, 101, 2_147_483_647]) await saveConcurrency(projectId, value, db.client);
   assert.deepEqual(db.calls.map((call) => call.values), [1, 100, 101, 2_147_483_647].map((value) => [projectId, value]));
   assert.ok(db.calls.every((call) => !call.sql.includes(projectId) && call.sql.includes("ON CONFLICT(project_id) DO UPDATE")));

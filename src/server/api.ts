@@ -4,6 +4,7 @@ import { z } from "zod";
 import { original } from "immer";
 import type { Member, ProjectData, TicketDetailData, Step, Ticket } from "../shared/types.js";
 import { DEFAULT_E2B_TEMPLATE } from "../shared/types.js";
+import { PROJECT_PERMISSIONS, projectPermissions, hasProjectPermission } from "../shared/permissions.js";
 import { readState, mutate, checkDatabase } from "./db.js";
 import {
   authenticate,
@@ -33,9 +34,13 @@ import {
   writeArtifact,
   audit,
   canAccess,
+  canCreateProjects,
   type State,
   type StoredProject,
+  ensureSystemUser,
+  hideSystemUser,
 } from "./state.js";
+import { admitToSprint, canViewAnalytics, projectAnalytics } from "./analytics.js";
 import { implementationReady } from "../shared/workflow.js";
 import { verifyGitHubConnection } from "./github.js";
 import { attachmentInput, replaceAttachments } from "./attachments.js";
@@ -161,7 +166,7 @@ api.post("/auth/setup", async (req, res) => {
     assert(
       !state.users.length,
       409,
-      "AIRA has already been set up. Please sign in.",
+      "Kangentix has already been set up. Please sign in.",
     );
     const user = {
       id: id(),
@@ -169,6 +174,7 @@ api.post("/auth/setup", async (req, res) => {
       email: input.email,
       passwordHash,
       mustChangePassword: false,
+      isSystemUser: true,
     };
     state.users.push(user);
     issueSession(state, req, res, user.id);
@@ -265,6 +271,7 @@ api.post("/projects", async (req, res) => {
     .parse(req.body);
   const result = await mutate(async (state, client) => {
     const user = authenticate(state, req);
+    assert(canCreateProjects(state, user.id), 403, "Project administrator access is required to create projects.");
     assert(
       !state.projects.some((p) => p.key === input.key),
       409,
@@ -278,10 +285,12 @@ api.post("/projects", async (req, res) => {
       model: "nemotron-3-ultra:cloud",
       modelProvider: "ollama",
       sandboxProvider: "docker",
-      dockerImage: process.env.SANDBOX_DOCKER_IMAGE || "aira-sandbox:local",
+      dockerImage: process.env.SANDBOX_DOCKER_IMAGE || "kangentix-sandbox:local",
       e2bTemplate: DEFAULT_E2B_TEMPLATE,
       steps: defaultSteps(),
       roles: { [user.id]: "admin" },
+      analyticsMemberIds: [],
+      permissionVersion: 2,
       githubConnected: false,
       githubIdentity: "",
       hasOllamaKey: false,
@@ -290,6 +299,7 @@ api.post("/projects", async (req, res) => {
       secrets: { githubToken: "", ollamaApiKey: "", claudeApiKey: "", e2bApiKey: "" },
     };
     state.projects.push(project);
+    ensureSystemUser(state);
     audit(
       state,
       project.id,
@@ -300,10 +310,15 @@ api.post("/projects", async (req, res) => {
     );
     return publicProject(project, client);
   });
-  res.status(201).json(result);
+  res.status(201).json(await viewerResponse(req, result));
 });
+async function viewerResponse<T>(req: Request, value: T): Promise<T> {
+  const state = await readState();
+  const user = authenticate(state, req, true);
+  return hideSystemUser(state, user.id, value);
+}
 const boardsInFlight = new Map<string, { state: State; body: Promise<string> }>();
-async function boardBody(state: State, project: StoredProject): Promise<string> {
+async function boardBody(state: State, project: StoredProject, viewerId: string): Promise<string> {
   const tickets = state.tickets.filter((t) => t.projectId === project.id);
   const ticketIds = new Set(tickets.map((t) => t.id));
   const result: ProjectData = {
@@ -319,7 +334,7 @@ async function boardBody(state: State, project: StoredProject): Promise<string> 
     audit: state.audit.filter((a) => a.projectId === project.id && !a.ticketId).slice(-50),
     workflowLocked: workflowLocked(state, project),
   };
-  return JSON.stringify(result);
+  return JSON.stringify(hideSystemUser(state, viewerId, result));
 }
 api.get("/projects/:id", async (req, res) => {
   const state = await readState();
@@ -327,13 +342,14 @@ api.get("/projects/:id", async (req, res) => {
   const project = projectFor(state, param(req, "id"), user.id);
   // Concurrent polls of one committed snapshot share their database reads and
   // encoding. Each request still authorizes independently; no response is cached.
-  let pending = boardsInFlight.get(project.id);
+  const cacheKey = `${project.id}:${user.id}`;
+  let pending = boardsInFlight.get(cacheKey);
   if (!pending || pending.state !== state) {
-    const body = boardBody(state, project).finally(() => {
-      if (boardsInFlight.get(project.id)?.body === body) boardsInFlight.delete(project.id);
+    const body = boardBody(state, project, user.id).finally(() => {
+      if (boardsInFlight.get(cacheKey)?.body === body) boardsInFlight.delete(cacheKey);
     });
     pending = { state, body };
-    boardsInFlight.set(project.id, pending);
+    boardsInFlight.set(cacheKey, pending);
   }
   res.setHeader("Cache-Control", "private, no-store");
   res.type("application/json").send(await pending.body);
@@ -384,7 +400,7 @@ api.get("/tickets/:id/detail", async (req, res) => {
     auditPageOldest:pageAudit.length ? { id:pageAudit[0].id, createdAt:pageAudit[0].createdAt } : null,
   };
   res.setHeader("Cache-Control","private, no-store");
-  res.json(result);
+  res.json(await viewerResponse(req, result));
 });
 api.get("/runs/:id/logs", async (req,res) => {
   const state = await readState();
@@ -394,7 +410,7 @@ api.get("/runs/:id/logs", async (req,res) => {
   projectFor(state,run.projectId,user.id);
   const version = req.query.version === undefined ? undefined : z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).parse(req.query.version);
   res.setHeader("Cache-Control","private, no-store");
-  res.json(await readRunLogs(run.id,version));
+  res.json(await viewerResponse(req, await readRunLogs(run.id,version)));
 });
 const projectPatch = z.object({
   name: name.optional(),
@@ -432,11 +448,18 @@ const projectPatch = z.object({
   e2bApiKey: token.optional(),
   githubToken: token.optional(),
 });
+function assertSettingsPermissions(project: StoredProject, userId: string, input: z.infer<typeof projectPatch>) {
+  const generalFields = new Set(["name", "description", "repository", "baseBranch", "githubToken"]);
+  const keys = Object.keys(input);
+  if (keys.some(key => generalFields.has(key))) assert(hasProjectPermission(project, userId, "generalWrite"), 403, "General write permission is required.");
+  if (keys.some(key => !generalFields.has(key))) assert(hasProjectPermission(project, userId, "sandboxWrite"), 403, "Sandbox and model write permission is required.");
+}
 api.patch("/projects/:id", async (req, res) => {
   const input = projectPatch.parse(req.body);
   const initial = await readState();
   const user = authenticate(initial, req);
-  const previous = projectFor(initial, param(req, "id"), user.id, true);
+  const previous = projectFor(initial, param(req, "id"), user.id);
+  assertSettingsPermissions(previous, user.id, input);
   const githubToken =
     input.githubToken ?? decrypt(previous.secrets.githubToken);
   const nextRepo = input.repository ?? previous.repository;
@@ -448,7 +471,8 @@ api.patch("/projects/:id", async (req, res) => {
     : null;
   const result = await mutate(async (state, client) => {
     const actor = authenticate(state, req);
-    const project = projectFor(state, previous.id, actor.id, true);
+    const project = projectFor(state, previous.id, actor.id);
+    assertSettingsPermissions(project, actor.id, input);
     assert(
       project.secrets.githubToken === previous.secrets.githubToken &&
         project.repository === previous.repository,
@@ -493,7 +517,7 @@ api.patch("/projects/:id", async (req, res) => {
     return publicProject(project, client);
   });
   if (input.maxConcurrentRuns !== undefined) wakeWorker();
-  res.json(result);
+  res.json(await viewerResponse(req, result));
 });
 api.post("/projects/:id/github/connect", async (req, res) => {
   const input = z
@@ -501,14 +525,14 @@ api.post("/projects/:id/github/connect", async (req, res) => {
     .parse(req.body);
   const initial = await readState();
   const user = authenticate(initial, req);
-  const previous = projectFor(initial, param(req, "id"), user.id, true);
+  const previous = projectFor(initial, param(req, "id"), user.id, "generalWrite");
   const githubToken = input.token || decrypt(previous.secrets.githubToken);
   assert(githubToken, 400, "Enter a GitHub access token.");
   const repo = input.repository || previous.repository;
   const result = await verifyConnection(githubToken, repo || undefined);
   await mutate(async (state, client) => {
     const actor = authenticate(state, req);
-    const project = projectFor(state, previous.id, actor.id, true);
+    const project = projectFor(state, previous.id, actor.id, "generalWrite");
     assert(
       project.secrets.githubToken === previous.secrets.githubToken &&
         project.repository === previous.repository,
@@ -533,7 +557,7 @@ api.post("/projects/:id/github/connect", async (req, res) => {
       `GitHub identity ${result.identity} connected${repo ? ` to ${repo}` : ""}.`,
     );
   });
-  res.json(result);
+  res.json(await viewerResponse(req, result));
 });
 const stepSchema = z.object({
   id: identifier,
@@ -558,7 +582,15 @@ api.put("/projects/:id/workflow", async (req, res) => {
     .parse(req.body);
   const result = await mutate(async (state, client) => {
     const user = authenticate(state, req);
-    const project = projectFor(state, param(req, "id"), user.id, true);
+    const project = projectFor(state, param(req, "id"), user.id, "workflowWrite");
+    const hiddenIds = state.users.filter(candidate => candidate.isSystemUser && !user.isSystemUser).map(candidate => candidate.id);
+    if (hiddenIds.length) {
+      for (const step of input.steps) {
+        assert(!step.approverIds.some(id => hiddenIds.includes(id)), 403, "Reviewer assignments cannot include hidden accounts.");
+        const previous = project.steps.find(candidate => candidate.id === step.id);
+        step.approverIds.push(...(previous?.approverIds.filter(id => hiddenIds.includes(id)) ?? []));
+      }
+    }
     const locked = workflowLocked(state, project);
     const first = input.steps[0];
     assert(
@@ -603,16 +635,17 @@ api.put("/projects/:id/workflow", async (req, res) => {
         );
         const agentStep =
           previous.kind === "definition" || previous.kind === "implement";
-        const fields = Object.keys(previous) as (keyof Step)[];
+        const fields = Object.keys(step) as (keyof typeof step)[];
         const disallowed = fields.filter(
           (key) =>
+            key !== "approverIds" && key !== "requiredApprovals" &&
             !(agentStep && (key === "model" || key === "instructions")) &&
             JSON.stringify(step[key]) !== JSON.stringify(previous[key]),
         );
         assert(
           !disallowed.length,
           409,
-          `Workflow is locked. Cannot change: ${disallowed.join(", ")}. Only model and instructions may be updated for agent steps.`,
+          `Workflow is locked. Cannot change: ${disallowed.join(", ")}. Reviewer rules may be updated, along with model and instructions for agent steps.`,
         );
       }
     }
@@ -651,18 +684,14 @@ api.put("/projects/:id/workflow", async (req, res) => {
         "Every approver must be a project member.",
       );
     }
+    const changedRules = new Set(input.steps.filter(step => {
+      const previous = project.steps.find(item => item.id === step.id);
+      return !previous || previous.requiredApprovals !== step.requiredApprovals ||
+        JSON.stringify([...previous.approverIds].sort()) !== JSON.stringify([...step.approverIds].sort());
+    }).map(step => step.id));
     project.steps = input.steps;
-    if (!locked) {
-      // Approval rules can only change when the current sprint has no unfinished tickets.
-      const activeIds = new Set(
-        state.tickets
-          .filter((t) => t.projectId === project.id && t.status === "active")
-          .map((t) => t.id),
-      );
-      state.approvals = state.approvals.filter(
-        (a) => !activeIds.has(a.ticketId),
-      );
-    }
+    const activeIds = new Set(state.tickets.filter(ticket => ticket.projectId === project.id && ticket.status === "active").map(ticket => ticket.id));
+    state.approvals = state.approvals.filter(approval => !activeIds.has(approval.ticketId) || (locked && !changedRules.has(approval.stepId)));
     audit(
       state,
       project.id,
@@ -670,48 +699,51 @@ api.put("/projects/:id/workflow", async (req, res) => {
       user.id,
       "workflow.updated",
       locked
-        ? "Agent models and instructions saved; workflow structure and existing approvals preserved."
+        ? "Workflow settings saved; approvals for changed reviewer rules cleared."
         : `Workflow saved with ${input.steps.length} steps.`,
     );
     return publicProject(project, client);
   });
-  res.json(result);
+  res.json(await viewerResponse(req, result));
 });
 api.get("/projects/:id/users", async (req, res) => {
   const state = await readState();
   const actor = authenticate(state, req);
-  const project = projectFor(state, param(req, "id"), actor.id, true);
+  const project = projectFor(state, param(req, "id"), actor.id, "peopleRead");
   const search =
     typeof req.query.search === "string"
       ? req.query.search.trim().toLowerCase().slice(0, 254)
       : "";
+  assert(!search || hasProjectPermission(project, actor.id, "peopleWrite"), 403, "People write permission is required to search users.");
   const users: Member[] = state.users
-    .filter((u) =>
+    .filter((u) => (!u.isSystemUser || actor.isSystemUser) && (
       project.roles[u.id]
         ? !search ||
           u.email.includes(search) ||
           u.name.toLowerCase().includes(search)
-        : !!search && u.email === search,
+        : !!search && u.email === search),
     )
     .map((u) => ({
       ...publicUser(u),
       role: project.roles[u.id] || "member",
+      permissions: projectPermissions(project, u.id),
     }));
-  res.json(users);
+  res.json(await viewerResponse(req, users));
 });
-api.post("/projects/:id/members", async (req, res) => {
-  const input = z
-    .object({
-      email,
-      name: name.optional(),
-      password: password.optional(),
-      role: z.enum(["admin", "member"]).optional(),
-    })
-    .parse(req.body);
+const memberInput = z.object({
+  email,
+  name: name.optional(),
+  password: password.optional(),
+  role: z.enum(["admin", "member"]).optional(),
+  permissions: z.array(z.enum(["analytics", "peopleRead", "peopleWrite", "workflowWrite", "generalRead", "generalWrite", "sandboxRead", "sandboxWrite"])).max(PROJECT_PERMISSIONS.length).optional(),
+});
+
+async function saveMember(req: Request, res: Response, input: z.infer<typeof memberInput>, targetUserId?: string) {
   const result = await mutate(async (state, client) => {
     const actor = authenticate(state, req);
-    const project = projectFor(state, param(req, "id"), actor.id, true);
-    let user = state.users.find((u) => u.email === input.email);
+    const project = projectFor(state, param(req, "id"), actor.id, "peopleWrite");
+    let user = state.users.find((u) => targetUserId ? u.id === targetUserId : u.email === input.email);
+    if (targetUserId) assert(user && project.roles[targetUserId], 404, "Project member not found.");
     if (!user) {
       assert(
         input.password && input.name,
@@ -727,15 +759,20 @@ api.post("/projects/:id/members", async (req, res) => {
       };
       state.users.push(user);
     }
-    const nextRole = input.role || project.roles[user.id] || "member";
-    if (project.roles[user.id] === "admin" && nextRole !== "admin") {
-      assert(
-        Object.values(project.roles).filter((role) => role === "admin").length > 1,
-        409,
-        "The project must retain at least one administrator.",
-      );
+    assert(!user.isSystemUser, actor.isSystemUser ? 403 : 404, actor.isSystemUser ? "The system user’s project access cannot be changed." : "Project member not found.");
+    const actorPermissions = projectPermissions(project, actor.id);
+    assert(projectPermissions(project, user.id).every(permission => actorPermissions.includes(permission)), 403, "You cannot change members with permissions you do not have.");
+    const permissions = [...new Set(input.permissions ?? (input.role === "admin" ? [...PROJECT_PERMISSIONS] : input.role === "member" ? [] : projectPermissions(project, user.id)))];
+    for (const [write, read] of [["peopleWrite", "peopleRead"], ["generalWrite", "generalRead"], ["sandboxWrite", "sandboxRead"]] as const) {
+      if (permissions.includes(write) && !permissions.includes(read)) permissions.push(read);
     }
+    assert(permissions.every(permission => actorPermissions.includes(permission)), 403, "You can grant only permissions you have.");
+    const nextRole = project.roles[user.id] === "admin" && input.role !== "member" &&
+      PROJECT_PERMISSIONS.every(permission => permissions.includes(permission)) ? "admin" : "member";
     project.roles[user.id] = nextRole;
+    project.memberPermissions ??= {};
+    project.memberPermissions[user.id] = permissions;
+    project.analyticsMemberIds = (project.analyticsMemberIds ?? []).filter(id => id !== user!.id);
     audit(
       state,
       project.id,
@@ -744,28 +781,34 @@ api.post("/projects/:id/members", async (req, res) => {
       "member.assigned",
       `${user.email} assigned with project role ${nextRole}.`,
     );
-    return { ...publicUser(user), role: nextRole };
+    return { ...publicUser(user), role: nextRole, permissions };
   });
-  res.status(201).json(result);
+  res.status(targetUserId ? 200 : 201).json(await viewerResponse(req, result));
+}
+api.post("/projects/:id/members", async (req, res) => {
+  await saveMember(req, res, memberInput.parse(req.body));
+});
+api.patch("/projects/:id/members/:userId", async (req, res) => {
+  const input = memberInput.pick({ permissions: true }).required().parse(req.body);
+  await saveMember(req, res, { email: "", ...input }, param(req, "userId"));
 });
 api.delete("/projects/:id/members/:userId", async (req, res) => {
   await mutate(async (state, client) => {
     const actor = authenticate(state, req);
-    const project = projectFor(state, param(req, "id"), actor.id, true);
+    const project = projectFor(state, param(req, "id"), actor.id, "peopleWrite");
     const userId = param(req, "userId");
     assert(project.roles[userId], 404, "Project member not found.");
-    assert(
-      project.roles[userId] !== "admin" ||
-        Object.values(project.roles).filter((role) => role === "admin").length > 1,
-      409,
-      "The project must retain at least one administrator.",
-    );
+    assert(!state.users.find(user => user.id === userId)?.isSystemUser, actor.isSystemUser ? 403 : 404, actor.isSystemUser ? "The system user cannot be removed from a project." : "Project member not found.");
+    const actorPermissions = projectPermissions(project, actor.id);
+    assert(projectPermissions(project, userId).every(permission => actorPermissions.includes(permission)), 403, "You cannot remove members with permissions you do not have.");
     assert(
       !project.steps.some((s) => s.approverIds.includes(userId)),
       409,
       "Remove this user from workflow approver rules before removing project access.",
     );
     delete project.roles[userId];
+    if (project.memberPermissions) delete project.memberPermissions[userId];
+    project.analyticsMemberIds = (project.analyticsMemberIds ?? []).filter(id => id !== userId);
     audit(
       state,
       project.id,
@@ -776,6 +819,38 @@ api.delete("/projects/:id/members/:userId", async (req, res) => {
     );
   });
   res.json({ ok: true });
+});
+
+api.get("/projects/:id/analytics", async (req, res) => {
+  const state = await readState();
+  const user = authenticate(state, req);
+  const project = projectFor(state, param(req, "id"), user.id);
+  assert(canViewAnalytics(project, user.id), 403, "Analytics access is required.");
+  res.setHeader("Cache-Control", "private, no-store");
+  res.json(projectAnalytics(state, project.id));
+});
+api.put("/projects/:id/analytics-access", async (req, res) => {
+  const input = z.object({ userIds: z.array(identifier).max(2000) }).parse(req.body);
+  const result = await mutate(async (state, client) => {
+    const actor = authenticate(state, req);
+    const project = projectFor(state, param(req, "id"), actor.id, "peopleWrite");
+    assert(new Set(input.userIds).size === input.userIds.length, 400, "Analytics users must be unique.");
+    assert(input.userIds.every(userId => !!project.roles[userId] && state.users.some(user => user.id === userId)), 400, "Analytics access can only be granted to project members.");
+    assert(hasProjectPermission(project, actor.id, "analytics"), 403, "You can grant only permissions you have.");
+    for (const userId of Object.keys(project.roles)) {
+      const previous = projectPermissions(project, userId);
+      const changed = previous.includes("analytics") !== input.userIds.includes(userId);
+      if (!changed || project.roles[userId] === "admin") continue;
+      assert(previous.every(permission => projectPermissions(project, actor.id).includes(permission)), 403, "You cannot change members with permissions you do not have.");
+      project.memberPermissions ??= {};
+      project.memberPermissions[userId] = previous.filter(permission => permission !== "analytics");
+      if (input.userIds.includes(userId)) project.memberPermissions[userId].push("analytics");
+    }
+    project.analyticsMemberIds = input.userIds;
+    audit(state, project.id, null, actor.id, "analytics.access_updated", "Project analytics access updated.");
+    return publicProject(project, client);
+  });
+  res.json(await viewerResponse(req, result));
 });
 
 const ticketInput = z.object({
@@ -808,6 +883,7 @@ api.post("/projects/:id/tickets", async (req, res) => {
       createdAt: now(),
       updatedAt: now(),
       closedAt: null,
+      startedAt: null,
       pullRequests: [],
     };
     if (input.attachments) replaceAttachments(state, ticket, input.attachments);
@@ -822,7 +898,7 @@ api.post("/projects/:id/tickets", async (req, res) => {
     );
     return ticket;
   });
-  res.status(201).json(result);
+  res.status(201).json(await viewerResponse(req, result));
 });
 api.get("/tickets/:id/attachments/:attachmentId", async (req, res) => {
   const state = await readState();
@@ -881,7 +957,7 @@ api.patch("/tickets/:id", async (req, res) => {
     );
     return ticket;
   });
-  res.json(result);
+  res.json(await viewerResponse(req, result));
 });
 api.post("/projects/:id/backlog/action", async (req, res) => {
   const input = z
@@ -917,14 +993,16 @@ api.post("/projects/:id/backlog/action", async (req, res) => {
     assert(
       input.action !== "sprint" || sprint,
       409,
-      "An administrator must start a sprint before adding tickets.",
+      "Start a sprint before adding tickets.",
     );
     const timestamp = now();
+    if (sprint) sprint.ticketIds ??= state.tickets.filter(ticket => ticket.projectId === project.id && ticket.sprintId === sprint.id).map(ticket => ticket.id);
     for (const ticket of tickets) {
       if (input.action === "sprint") {
         ticket.status = "active";
         ticket.stepId = project.steps[0].id;
         ticket.sprintId = sprint!.id;
+        admitToSprint(sprint!, ticket, timestamp);
         audit(
           state,
           project.id,
@@ -950,11 +1028,11 @@ api.post("/projects/:id/backlog/action", async (req, res) => {
     }
     return tickets;
   });
-  res.json(result);
+  res.json(await viewerResponse(req, result));
 });
 api.post("/projects/:id/sprints", async (req, res) => {
   const input = z
-    .object({ name: name.optional(), ticketIds: z.array(identifier).max(2000) })
+    .object({ name: name.optional(), description: z.string().trim().max(2000).default(""), ticketIds: z.array(identifier).max(2000) })
     .parse(req.body);
   const result = await mutate(async (state, client) => {
     const user = authenticate(state, req);
@@ -976,13 +1054,20 @@ api.post("/projects/:id/sprints", async (req, res) => {
         "Selected tickets must belong to this project and still be in Backlog.",
       );
     const previous = activeSprint(state, project.id);
-    if (previous) previous.endedAt = now();
+    if (previous) {
+      previous.ticketIds ??= state.tickets.filter(ticket => ticket.projectId === project.id && ticket.sprintId === previous.id).map(ticket => ticket.id);
+      previous.endedAt = now();
+    }
     const sprint = {
       id: id(),
       projectId: project.id,
       name:
         input.name ||
         `Sprint ${state.sprints.filter((s) => s.projectId === project.id).length + 1}`,
+      description: input.description,
+      ticketIds: [] as string[],
+      carriedTicketIds: [] as string[],
+      completedAt: null,
       startedAt: now(),
       endedAt: null,
     };
@@ -993,6 +1078,7 @@ api.post("/projects/:id/sprints", async (req, res) => {
     )) {
       if (ticket.status === "active") {
         ticket.sprintId = sprint.id;
+        admitToSprint(sprint, ticket, now(), true);
         ticket.updatedAt = now();
         carried++;
       }
@@ -1000,6 +1086,7 @@ api.post("/projects/:id/sprints", async (req, res) => {
         ticket.status = "active";
         ticket.stepId = project.steps[0].id;
         ticket.sprintId = sprint.id;
+        admitToSprint(sprint, ticket, now());
         ticket.updatedAt = now();
         audit(
           state,
@@ -1021,7 +1108,7 @@ api.post("/projects/:id/sprints", async (req, res) => {
     );
     return sprint;
   });
-  res.status(201).json(result);
+  res.status(201).json(await viewerResponse(req, result));
 });
 api.post("/tickets/:id/backlog", async (req, res) => {
   const result = await mutate(async (state, client) => {
@@ -1043,6 +1130,7 @@ api.post("/tickets/:id/backlog", async (req, res) => {
     ticket.sprintId = null;
     ticket.workflowSnapshot = null;
     ticket.closedAt = null;
+    ticket.startedAt = null;
     ticket.updatedAt = now();
     state.approvals = state.approvals.filter(
       (approval) => approval.ticketId !== ticket.id,
@@ -1057,7 +1145,7 @@ api.post("/tickets/:id/backlog", async (req, res) => {
     );
     return ticket;
   });
-  res.json(result);
+  res.json(await viewerResponse(req, result));
 });
 api.post("/tickets/:id/next", async (req, res) => {
   const result = await mutate(async (state, client) => {
@@ -1074,11 +1162,13 @@ api.post("/tickets/:id/next", async (req, res) => {
       assert(
         sprint,
         409,
-        "An administrator must start a sprint before adding this ticket.",
+        "Start a sprint before adding this ticket.",
       );
+      sprint.ticketIds ??= state.tickets.filter(item => item.projectId === project.id && item.sprintId === sprint.id).map(item => item.id);
       ticket.status = "active";
       ticket.stepId = project.steps[0].id;
       ticket.sprintId = sprint.id;
+      admitToSprint(sprint, ticket, now());
       audit(
         state,
         project.id,
@@ -1094,7 +1184,7 @@ api.post("/tickets/:id/next", async (req, res) => {
     return ticket;
   });
   wakeWorker();
-  res.json(result);
+  res.json(await viewerResponse(req, result));
 });
 api.put("/tickets/:id/artifacts/:stepId", async (req, res) => {
   const input = z
@@ -1124,7 +1214,7 @@ api.put("/tickets/:id/artifacts/:stepId", async (req, res) => {
     );
     return writeArtifact(state, ticket, step, input.content, user.id);
   });
-  res.json(result);
+  res.json(await viewerResponse(req, result));
 });
 api.post("/tickets/:id/approvals", async (req, res) => {
   const input = z
@@ -1212,7 +1302,7 @@ api.post("/tickets/:id/approvals", async (req, res) => {
     );
     return approval;
   });
-  res.status(201).json(result);
+  res.status(201).json(await viewerResponse(req, result));
 });
 api.delete("/tickets/:id/approvals/:stepId", async (req, res) => {
   await mutate(async (state, client) => {
@@ -1260,7 +1350,7 @@ api.post("/tickets/:id/runs", async (req, res) => {
     return enqueue(state, ticket, step, user.id, null, client);
   });
   wakeWorker();
-  res.status(202).json(result);
+  res.status(202).json(await viewerResponse(req, result));
 });
 api.post("/tickets/:id/threads", async (req, res) => {
   const input = z
@@ -1301,7 +1391,7 @@ api.post("/tickets/:id/threads", async (req, res) => {
     return thread;
   });
   wakeWorker();
-  res.status(201).json(result);
+  res.status(201).json(await viewerResponse(req, result));
 });
 api.post("/threads/:id/messages", async (req, res) => {
   const input = z.object({ content: prompt }).parse(req.body);
@@ -1334,7 +1424,7 @@ api.post("/threads/:id/messages", async (req, res) => {
     return message;
   });
   wakeWorker();
-  res.status(201).json(result);
+  res.status(201).json(await viewerResponse(req, result));
 });
 
 api.use((_req: Request, _res: Response) => {

@@ -11,7 +11,7 @@ function context(kind: RunContext["run"]["kind"] = "definition"): RunContext {
     run: { id: "contract-run", kind },
     project: { id: "contract-project", sandboxProvider: "e2b", modelProvider: "ollama", e2bTemplate: "base", repository: "owner/repo", baseBranch: "main", model: "project-model:cloud", steps: [{ id: "step" }] },
     step: { id: "step", name: "Definition", instructions: "Write a definition", model: "" },
-    ticket: { number: "AIRA-1", title: "Task", description: "Context" },
+    ticket: { number: "KANGENTIX-1", title: "Task", description: "Context" },
     artifacts: [], attachments: [], messages: [],
     credentials: { githubToken: "contract-github-secret", claudeApiKey: "contract-claude-secret", ollamaApiKey: "contract-ollama-secret", e2bApiKey: "contract-e2b-secret" },
   } as unknown as RunContext;
@@ -21,7 +21,7 @@ function provider(t: TestContext, response: unknown, changes: unknown = [], runE
   const commands: string[] = [];
   const requests: RequestInit[] = [];
   let kills = 0;
-  let input: { model: string; prompt: string; modelProvider: string; apiKey: string } | undefined;
+  let input: { model: string; prompt: string; modelProvider: string; apiKey: string; documents: Array<{ path: string }> } | undefined;
   const fetch = t.mock.method(globalThis, "fetch", async (url: string | URL, options: RequestInit = {}) => {
     requests.push(options);
     const path = String(url);
@@ -165,4 +165,15 @@ test("throttling after agent execution becomes terminal instead of replaying exe
   });
   assert.equal(external.commands.filter(command => command.endsWith("runner.py run")).length, 1);
   assert.equal(external.kills, 1);
+});
+
+test("implementation supplies Kangentix instructions and document paths to the sandbox", async (t) => {
+  const ctx = context("implement");
+  ctx.artifacts = [{ stepId: ctx.step.id, filename: "definition.md", content: "Approved definition" }] as RunContext["artifacts"];
+  const external = provider(t, { reply: "Already implemented" });
+  assert.deepEqual(await executeRun(ctx, async () => {}), { reply: "Already implemented", noChanges: true });
+  assert.ok(external.input?.prompt.includes("a Kangentix software delivery ticket"));
+  assert.ok(external.input?.prompt.includes("trusted Kangentix service"));
+  assert.deepEqual(external.input?.documents.map(document => document.path), ["docs/kangentix/KANGENTIX-1/definition.md"]);
+  assert.ok(external.commands.some(command => command.includes("python3 /tmp/kangentix/runner.py run")));
 });

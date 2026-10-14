@@ -4,7 +4,7 @@ import { implementationReady, requiredApprovalCount } from "../src/shared/workfl
 import type { Run, Step, Ticket, TicketPullRequest } from "../src/shared/types.js";
 
 const step: Step = { id: "step", kind: "implement", name: "Implement", instructions: "", model: "", requiredApprovals: 2, approverIds: ["user"], includePriorArtifacts: false, filename: "implementation.md" };
-const ticket = (pullRequests: TicketPullRequest[] = []): Ticket => ({ id: "ticket", projectId: "project", number: "AIRA-1", title: "Task", description: "", attachments: [], workflowSnapshot: null, priority: "medium", status: "active", stepId: step.id, sprintId: null, createdBy: "user", createdAt: "", updatedAt: "", closedAt: null, pullRequests });
+const ticket = (pullRequests: TicketPullRequest[] = []): Ticket => ({ id: "ticket", projectId: "project", number: "KANGENTIX-1", title: "Task", description: "", attachments: [], workflowSnapshot: null, priority: "medium", status: "active", stepId: step.id, sprintId: null, createdBy: "user", createdAt: "", updatedAt: "", closedAt: null, pullRequests });
 const run = (changes: Partial<Run> = {}): Run => ({ id: "run", projectId: "project", ticketId: "ticket", stepId: step.id, threadId: null, kind: "implement", status: "completed", cleanupStatus: "complete", logSealed: true, error: null, createdAt: "", startedAt: "", finishedAt: "", ...changes });
 const pr: TicketPullRequest = { stepId: step.id, runId: "run", number: 1, url: "https://github.com/owner/repo/pull/1" };
 

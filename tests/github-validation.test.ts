@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import { repositoryPath, validateFileChanges, type FileChange, type RepositorySnapshot } from "../src/server/github.js";
+import { createImplementationPr, repositoryPath, validateFileChanges, type FileChange, type RepositorySnapshot } from "../src/server/github.js";
 
 const snapshot: RepositorySnapshot = {
   sha: "commit", treeSha: "tree", entries: [], archivePath: "unused", archiveSize: 0,
@@ -63,4 +63,32 @@ test("file transfer limits count decoded bytes per file and across the complete 
   const maximum = Array.from({ length: 4 }, (_, i) => ({ path: `file-${i}`, mode: "100644" as const, content: boundary }));
   assert.equal(validateFileChanges(maximum, snapshot).length, 4);
   assert.throws(() => validateFileChanges([...maximum, change("one-byte-too-many", "x")], snapshot), /20 MiB total/);
+});
+
+test("publication creates a Kangentix branch and PR with the branded artifact location", async (t) => {
+  const branch = "kangentix/kangentix-1/run1";
+  const bodies: Array<{ path: string; body: Record<string, unknown> }> = [];
+  t.mock.method(globalThis, "fetch", async (url: string | URL, options: RequestInit = {}) => {
+    const path = new URL(url).pathname;
+    if (options.body) {
+      const body = JSON.parse(String(options.body));
+      bodies.push({ path, body });
+      if (path.endsWith("/git/blobs")) return Response.json({ sha: "blob" });
+      if (path.endsWith("/git/trees")) return Response.json({ sha: "new-tree" });
+      if (path.endsWith("/git/commits")) return Response.json({ sha: "new-commit" });
+      if (path.endsWith("/git/refs")) return Response.json({});
+      if (path.endsWith("/pulls")) return Response.json({ number: 7, html_url: "https://github.com/owner/repo/pull/7" });
+    }
+    if (path.endsWith("/pulls")) return Response.json([]);
+    if (path.endsWith("/pulls/7")) return Response.json({ number: 7, html_url: "https://github.com/owner/repo/pull/7", head: { ref: branch, sha: "new-commit", repo: { full_name: "owner/repo" } }, base: { ref: "main", repo: { full_name: "owner/repo" } } });
+    if (path.endsWith("/git/commits/new-commit")) return Response.json({ tree: { sha: "new-tree" }, parents: [{ sha: snapshot.sha }] });
+    throw new Error(`Unexpected GitHub request: ${path}`);
+  });
+  const result = await createImplementationPr({ token: "publication-test-key", repository: "owner/repo", baseBranch: "main", snapshot, changes: [change("source")], ticketNumber: "KANGENTIX-1", title: "Task", runId: "run1", reply: "Implemented" }, async () => {});
+  assert.equal(result.prNumber, 7);
+  assert.equal(bodies.find(item => item.path.endsWith("/git/refs"))?.body.ref, `refs/heads/${branch}`);
+  const pr = bodies.find(item => item.path.endsWith("/pulls"))?.body;
+  assert.equal(pr?.head, branch);
+  assert.match(String(pr?.body), /from Kangentix/);
+  assert.match(String(pr?.body), /docs\/kangentix\/KANGENTIX-1\//);
 });

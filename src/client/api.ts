@@ -41,8 +41,8 @@ export function errorMessage(error: unknown) {
 
 export function remembered(key: string, value?: string) {
   try {
-    if (value !== undefined) localStorage.setItem(`aira.${key}`, value);
-    return localStorage.getItem(`aira.${key}`) || "";
+    if (value !== undefined) localStorage.setItem(`kangentix.${key}`, value);
+    return localStorage.getItem(`kangentix.${key}`) || "";
   } catch {
     return "";
   }

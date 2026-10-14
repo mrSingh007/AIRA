@@ -5,16 +5,17 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import type { Server } from "node:http";
 
-const databaseUrl = process.env.AIRA_TEST_DATABASE_URL;
+const databaseUrl = process.env.KANGENTIX_TEST_DATABASE_URL;
 const integration = databaseUrl ? test : test.skip;
 if (databaseUrl) process.env.DATABASE_URL = databaseUrl;
 const { initializeDatabase, mutate, readState, pool, closeDatabase } = await import("../src/server/db.js");
 const { api } = await import("../src/server/api.js");
-const { id, now, enqueue, publicProject, ApiError } = await import("../src/server/state.js");
+const { id, now, enqueue, publicProject, ApiError, ensureSystemUser } = await import("../src/server/state.js");
 const { initializeSecurity, hashToken, encrypt, decrypt } = await import("../src/server/security.js");
 const { effectiveConcurrency, saveConcurrency } = await import("../src/server/project-agent-settings.js");
 const { getRun, listRuns, updateRun, setLifecycle, reservationCounts, recoverInterruptedRuns, claimRun, listLifecycles, enqueueRun } = await import("../src/server/run-repository.js");
 const { openRunLog, readRunLogs } = await import("../src/server/run-logs.js");
+let fixtureSystemId: string | undefined;
 const adminId: string = id();
 const memberId: string = id();
 const outsiderId: string = id();
@@ -31,11 +32,16 @@ before(async () => {
   initializeSecurity();
   await initializeDatabase();
   await mutate(state => {
+    if (!state.users.length) {
+      fixtureSystemId = id();
+      state.users.push({ id: fixtureSystemId, name: "System fixture", email: `${fixtureSystemId}@example.test`, passwordHash: "unused", mustChangePassword: false, isSystemUser: true });
+    }
     for (const [index,userId] of [adminId,memberId,outsiderId].entries()) {
       state.users.push({id:userId,name:"Fixture",email:`${userId}@example.test`,passwordHash:"unused",mustChangePassword:false});
       state.sessions.push({userId,tokenHash:hashToken(cookies[index]),expiresAt:new Date(Date.now()+60_000).toISOString()});
     }
     state.projects.push({id:projectId,name:"Concurrent fixture",key:"FIX",description:"",repository:"",baseBranch:"main",model:"test",modelProvider:"ollama",sandboxProvider:"docker",dockerImage:"fixture",e2bTemplate:"",steps:[{id:stepId,name:"Define",kind:"definition",instructions:"",model:"",requiredApprovals:0,approverIds:[],includePriorArtifacts:false,filename:"definition.md"}],roles:{[adminId]:"admin",[memberId]:"member"},githubConnected:false,githubIdentity:"",hasOllamaKey:false,hasClaudeKey:false,hasE2bKey:false,secrets:{githubToken:"",ollamaApiKey:"",claudeApiKey:"",e2bApiKey:""}});
+    ensureSystemUser(state);
     state.tickets.push({id:ticketId,projectId,number:"FIX-1",title:"Concurrent test",description:"",attachments:[],workflowSnapshot:null,priority:"medium",status:"active",stepId,sprintId:null,createdBy:adminId,createdAt:now(),updatedAt:now(),closedAt:null,pullRequests:[]});
   });
   const app = express();
@@ -49,13 +55,13 @@ before(async () => {
 after(async () => {
   if (server) await new Promise<void>(resolve => server.close(() => resolve()));
   if (databaseUrl) {
-    await pool.query("DELETE FROM aira_runs WHERE project_id=$1",[projectId]);
-    await pool.query("DELETE FROM aira_project_agent_settings WHERE project_id=$1",[projectId]);
+    await pool.query("DELETE FROM kangentix_runs WHERE project_id=$1",[projectId]);
+    await pool.query("DELETE FROM kangentix_project_agent_settings WHERE project_id=$1",[projectId]);
     await mutate(state => {
       const ticketIds=new Set(state.tickets.filter(ticket=>ticket.projectId===projectId).map(ticket=>ticket.id));
       const threadIds=new Set(state.threads.filter(thread=>ticketIds.has(thread.ticketId)).map(thread=>thread.id));
       const attachmentIds=new Set(state.tickets.filter(ticket=>ticketIds.has(ticket.id)).flatMap(ticket=>ticket.attachments.map(attachment=>attachment.id)));
-      state.users=state.users.filter(user=>![adminId,memberId,outsiderId].includes(user.id));
+      state.users=state.users.filter(user=>![adminId,memberId,outsiderId,fixtureSystemId].includes(user.id));
       state.sessions=state.sessions.filter(session=>![adminId,memberId,outsiderId].includes(session.userId));
       state.projects=state.projects.filter(project=>project.id!==projectId);
       state.tickets=state.tickets.filter(ticket=>!ticketIds.has(ticket.id));
@@ -72,9 +78,47 @@ after(async () => {
   await closeDatabase();
 });
 async function request(path:string,body?:unknown,user=0) {
-  return fetch(`${origin}/api${path}`,{method:body===undefined?"GET":"PATCH",headers:{Cookie:`aira_session=${cookies[user]}`,"Content-Type":"application/json"},body:body===undefined?undefined:JSON.stringify(body)});
+  return fetch(`${origin}/api${path}`,{method:body===undefined?"GET":"PATCH",headers:{Cookie:`kangentix_session=${cookies[user]}`,"Content-Type":"application/json"},body:body===undefined?undefined:JSON.stringify(body)});
 }
-integration("concurrent board polls share work while authorizing every requester", async (t) => {
+integration("project creation rejects direct member and outsider API requests and rechecks revoked administrator access", async () => {
+  const create = (user: number, key: string) => fetch(`${origin}/api/projects`, {
+    method: "POST", headers: {Cookie: `kangentix_session=${cookies[user]}`, "Content-Type": "application/json"},
+    body: JSON.stringify({name: "Creation authorization fixture", key}),
+  });
+  const before = await readState();
+  let createdProjectId: string | undefined;
+  try {
+    assert.equal((await (await request("/auth/me", undefined, 0)).json()).canCreateProjects, true);
+    for (const user of [1, 2]) {
+      assert.equal((await (await request("/auth/me", undefined, user)).json()).canCreateProjects, false);
+      // Authorization precedes even duplicate-key disclosure.
+      assert.equal((await create(user, "FIX")).status, 403);
+    }
+    assert.deepEqual((await readState()).projects, before.projects);
+    assert.deepEqual((await readState()).audit, before.audit);
+    await mutate(state => { state.projects.find(project => project.id === projectId)!.roles[adminId] = "member"; });
+    assert.equal((await create(0, "CREATEAUTH")).status, 403);
+    assert.equal((await (await request("/auth/me")).json()).canCreateProjects, false);
+    await mutate(state => { state.projects.find(project => project.id === projectId)!.roles[adminId] = "admin"; });
+    const response = await create(0, "CREATEAUTH");
+    assert.equal(response.status, 201);
+    const created = await response.json();
+    createdProjectId = created.id;
+    assert.equal(created.roles[adminId], "admin");
+    const systemUser = (await readState()).users.find(user => user.isSystemUser)!;
+    assert.equal(created.roles[systemUser.id], undefined);
+    assert.equal((await readState()).projects.find(project => project.id === created.id)!.roles[systemUser.id], "admin");
+    assert.ok((await readState()).projects.some(project => project.id === created.id));
+    assert.equal((await create(0, "CREATEAUTH")).status, 409);
+  } finally {
+    await mutate(state => {
+      state.projects.find(project => project.id === projectId)!.roles[adminId] = "admin";
+      state.projects = state.projects.filter(project => project.id !== createdProjectId);
+      state.audit = state.audit.filter(event => event.projectId !== createdProjectId);
+    });
+  }
+});
+integration("concurrent board polls share work per viewer while authorizing every requester", async (t) => {
   let release!: () => void;
   let began!: () => void;
   const hold = new Promise<void>(resolve => { release=resolve; });
@@ -95,7 +139,7 @@ integration("concurrent board polls share work while authorizing every requester
     release();
     const responses=await requests;
     const boards=await Promise.all(responses.map(async response=> {assert.equal(response.status,200);return response.json();}));
-    assert.equal(summaries,1);
+    assert.equal(summaries,2);
     for (const board of boards) {assert.equal(board.project.id,projectId);assert.equal("secrets" in board.project,false);}
   } finally {release();await requests;mocked.mock.restore();}
 });
@@ -208,15 +252,15 @@ integration("claim enforces live limits across execution and cleanup, retaining 
   assert.equal((await reservationCounts()).get(projectId),2);
   await mutate(async(_state,client)=>saveConcurrency(projectId,1,client));
   assert.equal((await reservationCounts()).get(projectId),2);
-  const provider=await pool.query("SELECT provider FROM aira_runs WHERE id=$1",[queued[0].id]);
+  const provider=await pool.query("SELECT provider FROM kangentix_runs WHERE id=$1",[queued[0].id]);
   assert.equal(provider.rows[0].provider,"docker");
 });
 integration("operational writes are normalized and do not rewrite core settings",async () => {
-  const before=await pool.query("SELECT document,updated_at FROM aira_state WHERE id=1");
+  const before=await pool.query("SELECT document,updated_at FROM kangentix_state WHERE id=1");
   await mutate(state=> {state.tickets.find(t=>t.id===ticketId)!.title="Changed normalized record";});
-  const after=await pool.query("SELECT document,updated_at FROM aira_state WHERE id=1");
+  const after=await pool.query("SELECT document,updated_at FROM kangentix_state WHERE id=1");
   assert.deepEqual(after.rows[0],before.rows[0]);
-  const record=await pool.query("SELECT document FROM aira_records WHERE kind='tickets' AND record_id=$1",[ticketId]);
+  const record=await pool.query("SELECT document FROM kangentix_records WHERE kind='tickets' AND record_id=$1",[ticketId]);
   assert.equal(record.rows[0].document.title,"Changed normalized record");
 });
 
@@ -274,7 +318,7 @@ integration("fresh enqueues use the database eligibility clock despite an ahead 
     await enqueueRun(run,projectId,client);
     await saveConcurrency(projectId,10,client);
   });
-  const eligible=await pool.query("SELECT eligible_at <= now() AS ready FROM aira_runs WHERE id=$1",[futureRunId]);
+  const eligible=await pool.query("SELECT eligible_at <= now() AS ready FROM kangentix_runs WHERE id=$1",[futureRunId]);
   assert.equal(eligible.rows[0].ready,true);
   assert.equal(await mutate(async(_state,client)=>claimRun(futureRunId,"docker",client)),true);
 });
