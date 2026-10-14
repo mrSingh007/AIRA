@@ -51,7 +51,7 @@ export async function initializeDatabase() {
     [JSON.stringify({users:[],projects:[],sessions:[]})],
   );
 }
-const operationalKeys = ["tickets", "sprints", "artifacts", "revisions", "approvals", "threads", "messages", "audit"] as const;
+const operationalKeys = ["tickets", "artifacts", "revisions", "approvals", "threads", "messages", "audit"] as const;
 const coreSelection = "jsonb_build_object('users',document->'users','projects',document->'projects','sessions',document->'sessions') AS document";
 let committedState: State | undefined;
 let committedRecords: Map<string, OperationalRecord> | undefined;
@@ -64,6 +64,10 @@ function hydrate(core: Partial<State>, rows: Array<{kind:string;record_id:string
   for (const row of rows) {
     if (row.kind === "attachmentData") state.attachmentData[row.record_id] = row.document;
     else if ((operationalKeys as readonly string[]).includes(row.kind)) (state[row.kind as typeof operationalKeys[number]] as any[]).push(row.document);
+  }
+  // Preserve saved workflow configuration while giving the starting step its Kanban identity.
+  for (const project of state.projects) {
+    if (project.steps?.[0] && (project.steps[0].kind as string) === "sprint") project.steps[0].kind = "parking";
   }
   ensureSystemUser(state);
   return state;
@@ -100,7 +104,6 @@ export async function readProjectState(projectId: string): Promise<State> {
   const attachmentIds = new Set(state.tickets.filter(ticket => ticketIds.has(ticket.id)).flatMap(ticket => ticket.attachments.map(attachment => attachment.id)));
   return { ...state,
     tickets: state.tickets.filter(ticket => ticketIds.has(ticket.id)),
-    sprints: state.sprints.filter(sprint => sprint.projectId === projectId),
     artifacts: state.artifacts.filter(artifact => ticketIds.has(artifact.ticketId)),
     revisions: state.revisions.filter(artifact => ticketIds.has(artifact.ticketId)),
     approvals: state.approvals.filter(approval => ticketIds.has(approval.ticketId)),

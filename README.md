@@ -14,13 +14,13 @@ Agents help write documents and prepare code changes. Your team discusses the wo
 
 ## Screenshots
 
-The screenshots below are from development and will be refreshed to show the current Kangentix branding.
+The screenshots below show an earlier development build. Labels and layout may differ from the current Kanban interface.
 
-### Team sprint board
+### Team Kanban board
 
 Track tickets across your workflow, with priorities, agent status, and approval progress visible to the team.
 
-![Kangentix sprint board showing configurable workflow columns, ticket priorities, and approval progress](docs/home.png)
+![Kangentix Kanban board showing configurable workflow columns, ticket priorities, and approval progress](docs/home.png)
 
 ### Documents, discussions, and approvals
 
@@ -65,13 +65,13 @@ Open **[http://localhost:3000](http://localhost:3000)**. Compose builds the app 
 3. Under **Config → Sandbox & models → Models & credentials**, select **Ollama Cloud** or **Claude**, save its API key, and enter a supported default model.
 4. Under **Config → Sandbox & models → Agent sandbox**, use the default Docker image or configure E2B.
 5. In **Config → Users**, add team members and choose their project permissions. In **Config → Workflow**, configure steps, agent instructions, reviewers, and approval counts. New projects start with **Todo**; you add the remaining stages.
-6. Create backlog tickets, start a sprint, and use **Next step** to move a ticket through the workflow.
+6. Create tickets on the Board or add selected backlog tickets to the Board, and use **Next step** to move a ticket through the workflow.
 
 Try your first agent workflow with a small ticket and a disposable repository. Completing an agent run does not automatically advance the ticket, and marking a ticket Done does not merge its pull request.
 
-The initial setup account is the protected system user, with full access to every existing and new project. Its project access cannot be removed or reduced. The system user and accounts that are administrators of at least one project can create projects. Members and accounts without project access cannot create projects; accounts without access are prompted to ask an administrator to add them to a project. The API enforces these permissions.
+The initial setup account is the protected system user, with full access to every existing and new project. Its project access cannot be removed or reduced. Only the system user can create projects through the project switcher. Members and accounts without project access cannot create projects; accounts without access are prompted to ask an administrator to add them to a project. The API enforces these permissions.
 
-Every member has **Basic (Sprint, Backlog & Done)** access and can be selected as a step reviewer. General, Sandbox & models, and Users each have separate Read and Write permissions; Workflow Write and Analytics are granted independently. Users Read shows the full Users page with editing and creation disabled. Users Write can grant only permissions the current user holds. The system account is visible only to itself, including in reviewer lists; its hidden reviewer assignments and approvals remain effective. See [accounts and permissions](docs/FEATURES.md#accounts-projects-and-people) for details.
+Every member has **Basic (Board, Backlog & Done)** access and can be selected as a step reviewer. General, Sandbox & models, and Users each have separate Read and Write permissions; Workflow Write and Analytics are granted independently. Users Read shows the full Users page with editing and creation disabled. Users Write can grant only permissions the current user holds. The system account is visible only to itself, including in reviewer lists; its hidden reviewer assignments and approvals remain effective. See [accounts and permissions](docs/FEATURES.md#accounts-projects-and-people) for details.
 
 ### Manage the local installation
 
@@ -80,16 +80,17 @@ docker compose ps
 docker compose logs -f app
 ```
 
-After the initial build, use `docker compose up -d` to start and `docker compose down` to stop. The `postgres_data` volume retains accounts, settings, tickets, and history. `docker compose down -v` deletes that data. Back up PostgreSQL together with `APP_SECRET`.
+After the initial build, use `docker compose up -d` to start and `docker compose down` to stop. After updating the source, run `docker compose up --build -d` to rebuild and apply the changes; keep the existing `.env` and `APP_SECRET`. The `postgres_data` volume retains accounts, settings, tickets, and history. `docker compose down -v` deletes that data. Back up PostgreSQL together with `APP_SECRET`.
 
 ## Features
 
-- **Shared Kanban and sprints:** organize backlog tickets, priorities, sprint work, optional sprint goal notes, and a searchable Done archive. Marking a ticket Done moves it to the archive immediately.
-- **Project analytics:** view delivery counts and timing metrics; access is granted per project through Users permissions.
+- **Shared Kanban:** create tickets directly on an ongoing board or move them from Backlog, without sprints. Marking a ticket Done moves it to the searchable Done archive immediately.
+- **Ticket search and attachments:** search ticket text, step documents, and uploaded Markdown; Board search highlights matches. Attach up to five images and five Markdown files, each up to 2 MiB, when creating tickets on the Board or in Backlog.
+- **Project analytics:** view completion time, weekly close rate, and priority counts across Backlog and Board; access is granted per project through Users permissions.
 - **Configurable workflows:** combine manual stages, agent-generated documents, and implementation steps that create GitHub pull requests.
 - **Human review and approval:** assign eligible reviewers and approval counts per step; changes invalidate previous approvals so the team reviews the current work.
 - **Collaborative documents:** edit versioned Markdown, ask the agent questions, and request revisions in independent discussion threads.
-- **Repository context and images:** give agents a fresh base-branch snapshot, selected prior documents, and ticket attachments.
+- **Repository context and attachments:** give agents a fresh base-branch snapshot, selected prior documents, and ticket image or Markdown attachments.
 - **Execution visibility:** inspect run status, redacted logs, activity, cleanup state, and paginated history from each ticket.
 - **Project-specific configuration:** manage membership, model providers, sandbox providers, and concurrency limits independently per project.
 - **Light and dark themes:** choose your preferred appearance in the browser. Collapse or expand the desktop sidebar; its state persists for the browser tab session.

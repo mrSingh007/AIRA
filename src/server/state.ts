@@ -1,7 +1,6 @@
 import type { DatabaseClient } from "./db.js";
 import { concurrencySettings, effectiveConcurrency } from "./project-agent-settings.js";
 import { enqueueRun, listRuns, ticketBusy } from "./run-repository.js";
-import { recordSprintCompletion } from "./analytics.js";
 import { randomUUID } from "node:crypto";
 import { current, isDraft } from "immer";
 import { DEFAULT_MAX_CONCURRENT_RUNS } from "../shared/types.js";
@@ -15,7 +14,6 @@ import type {
   ProjectPermission,
   Project,
   Ticket,
-  Sprint,
   Artifact,
   Approval,
   Thread,
@@ -44,7 +42,6 @@ export interface State {
   users: StoredUser[];
   projects: StoredProject[];
   tickets: Ticket[];
-  sprints: Sprint[];
   artifacts: Artifact[];
   revisions: Artifact[];
   approvals: Approval[];
@@ -58,7 +55,6 @@ export const emptyState = (): State => ({
   users: [],
   projects: [],
   tickets: [],
-  sprints: [],
   artifacts: [],
   revisions: [],
   approvals: [],
@@ -175,8 +171,7 @@ export function canAccess(
   return !!roleFor(project, userId);
 }
 export function canCreateProjects(state: State, userId: string): boolean {
-  return state.users.some(user => user.id === userId && user.isSystemUser) || state.projects.some((project) => roleFor(project, userId) === "admin") ||
-    (state.projects.length === 0 && state.users[0]?.id === userId);
+  return state.users.some(user => user.id === userId && user.isSystemUser);
 }
 export function projectFor(
   state: State,
@@ -244,18 +239,7 @@ export function audit(
   });
 }
 export function workflowLocked(state: State, project: Project | StoredProject): boolean {
-  const activeSprintIds = new Set(
-    state.sprints
-      .filter((sprint) => sprint.projectId === project.id && !sprint.endedAt)
-      .map((sprint) => sprint.id),
-  );
-  return state.tickets.some(
-    (ticket) =>
-      ticket.projectId === project.id &&
-      ticket.status === "active" &&
-      ticket.sprintId !== null &&
-      activeSprintIds.has(ticket.sprintId),
-  );
+  return state.tickets.some(ticket => ticket.projectId === project.id && ticket.status === "active");
 }
 export function currentStep(project: Project | StoredProject, ticket: Ticket): Step {
   const step = project.steps.find((s) => s.id === ticket.stepId);
@@ -340,7 +324,6 @@ export async function advanceCurrentStep(
     ticket.workflowSnapshot = structuredClone(isDraft(project.steps) ? current(project.steps) : project.steps);
     ticket.status = "closed";
     ticket.closedAt = now();
-    recordSprintCompletion(state, ticket);
     audit(
       state,
       project.id,

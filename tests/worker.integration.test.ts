@@ -32,7 +32,7 @@ test('real PostgreSQL: per-project scheduling, live edits, outcome retries, logs
   const fixtureTickets:Ticket[]=[];
   const addTickets=async(count:number,targets=projects)=>mutate(async(state,client)=>{
     for(const project of targets)for(let i=0;i<count;i++){
-      const ticket:Ticket={id:randomUUID(),projectId:project.id,number:`TEST-${fixtureTickets.length}`,title:'Synthetic ticket',description:'x'.repeat(1000),attachments:[],workflowSnapshot:null,priority:'medium',status:'active',stepId:'definition',sprintId:null,createdBy:userId,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),closedAt:null,pullRequests:[]};
+      const ticket:Ticket={id:randomUUID(),projectId:project.id,number:`TEST-${fixtureTickets.length}`,title:'Synthetic ticket',description:'x'.repeat(1000),attachments:[],workflowSnapshot:null,priority:'medium',status:'active',stepId:'definition',createdBy:userId,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),closedAt:null,pullRequests:[]};
       fixtureTickets.push(ticket);state.tickets.push(ticket);await enqueue(state,ticket,project.steps[0],userId,null,client);
     }
   });
@@ -126,7 +126,7 @@ test('real PostgreSQL: per-project scheduling, live edits, outcome retries, logs
     const serverAddress=server!.address();assert(serverAddress&&typeof serverAddress!=='string');const oneRoot=`http://127.0.0.1:${serverAddress.port}`;
     await Promise.all(Array.from({length:100},async(_,i)=>{
       const began=performance.now();const response=await fetch(`${oneRoot}/api/projects/${projects[0].id}`,{headers:{Cookie:`kangentix_session=${token}`}});assert.equal(response.status,200);await response.json();oneReads.push(performance.now()-began);
-      const writeBegan=performance.now();const result=await fetch(`${oneRoot}/api/projects/${projects[0].id}/tickets`,{method:'POST',headers:{Cookie:`kangentix_session=${token}`,'Content-Type':'application/json'},body:JSON.stringify({title:`Single-project board action ${i}`})});assert.equal(result.status,201);await result.json();oneWrites.push(performance.now()-writeBegan);
+      const writeBegan=performance.now();const result=await fetch(`${oneRoot}/api/projects/${projects[0].id}/tickets`,{method:'POST',headers:{Cookie:`kangentix_session=${token}`,'Content-Type':'application/json'},body:JSON.stringify({title:`Single-project board action ${i}`,description:"Ordinary workflow write"})});assert.equal(result.status,201);await result.json();oneWrites.push(performance.now()-writeBegan);
     }));
     singleProject={active:100,readsP95Ms:percentile(oneReads,.95),writesP95Ms:percentile(oneWrites,.95)};
     for(const id of [...deferred.keys()])finish(id);await wait(()=>workerActivity().length===0);await stopWorker(0);

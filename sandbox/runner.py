@@ -107,16 +107,16 @@ def prepare():
             raise RuntimeError('Artifact destination must not be a symbolic link')
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(artifact['content'])
-    for image in config.get('images', []):
-        target = path_for(image['path'])
+    for attachment in config.get('attachments', []):
+        target = path_for(attachment['path'])
         if target.is_symlink():
-            raise RuntimeError('Image destination must not be a symbolic link')
-        content = base64.b64decode(image['content'], validate=True)
+            raise RuntimeError('Attachment destination must not be a symbolic link')
+        content = base64.b64decode(attachment['content'], validate=True)
         if not content or len(content) > 2 * 1024 * 1024:
-            raise RuntimeError('Ticket image exceeds its size limit')
+            raise RuntimeError('Ticket attachment exceeds its size limit')
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(content)
-    emit('Fresh base snapshot ready; ticket documents and images loaded.')
+    emit('Fresh base snapshot ready; ticket documents and attachments loaded.')
 
 
 def run():

@@ -99,6 +99,7 @@ test("permission boundaries, delegated grants, system protection and locked work
   assert.equal((await invoke("/projects/:id", "patch", 5, params, { description: "Allowed" })).status, 200);
   await mutate(current => { current.projects[0].roles[ids[5]] = "admin"; });
   assert.equal((await patch(0, 5, [...PROJECT_PERMISSIONS])).result.role, "admin");
+  assert.equal((await invoke("/projects", "post", 5, {}, { name: "Forbidden project", key: "NOPE" })).status, 403);
   assert.equal((await patch(0, 5, ["generalWrite"])).result.role, "member");
   // A People writer with Analytics cannot acquire the separate General/Workflow permissions.
   assert.deepEqual(projectPermissions((await readState()).projects[0], ids[1]), ["analytics", "peopleRead", "peopleWrite"]);
@@ -108,8 +109,8 @@ test("permission boundaries, delegated grants, system protection and locked work
   const workflow = (actor: number, steps: unknown[]) => invoke("/projects/:id/workflow", "put", actor, params, { steps });
   assert.equal((await workflow(2, [first, manual])).status, 403);
   assert.equal((await workflow(0, [first, manual])).status, 200);
-  const ticket = (await invoke("/projects/:id/tickets", "post", 3, params, { title: "In progress" })).result;
-  await invoke("/projects/:id/sprints", "post", 0, params, { name: "Sprint", ticketIds: [ticket.id] });
+  const ticket = (await invoke("/projects/:id/tickets", "post", 3, params, { title: "In progress", description: "A real ticket" })).result;
+  await invoke("/projects/:id/board/tickets", "post", 0, params, { ticketIds: [ticket.id] });
   const doneId = randomUUID();
   await mutate(current => {
     current.tickets.push({ ...current.tickets[0], id: doneId, status: "closed", closedAt: new Date().toISOString(), workflowSnapshot: structuredClone([first, { ...manual, kind: "manual" as const }]) });
@@ -180,5 +181,43 @@ test("permission boundaries, delegated grants, system protection and locked work
   assert.equal((await workflow(4, [first, { ...manual, approverIds: [ids[0]], requiredApprovals: 1 }])).status, 403);
   // Hidden reviewer assignments are retained across visible edits.
   assert.ok((await readState()).projects[0].steps[1].approverIds.includes(ids[0]));
+
+  // Kanban admission needs no sprint, rejects duplicate or non-backlog selections,
+  // and locks workflow structure for every active ticket.
+  assert.equal((await invoke("/projects/:id/board/tickets", "post", 0, params, { ticketIds: [ticket.id] })).status, 409);
+  const backlog = (await invoke("/projects/:id/tickets", "post", 3, params, { title: "Next idea", description: "Required context" })).result;
+  assert.equal((await invoke("/projects/:id/board/tickets", "post", 0, params, { ticketIds: [backlog.id, backlog.id] })).status, 400);
+  const direct = (await invoke("/projects/:id/tickets", "post", 3, params, { title: "Direct to Board", description: "Required context", status: "active", attachments: [] })).result;
+  assert.equal(direct.status, "active");
+  assert.equal(direct.stepId, first.id);
+  assert.ok(direct.startedAt);
+  assert.equal((await invoke("/projects/:id", "get", 0, params)).result.workflowLocked, true);
+  await assert.rejects(invoke("/projects/:id/tickets", "post", 3, params, { title: "Missing context", description: "   " }));
+  const withMarkdown = (await invoke("/projects/:id/tickets", "post", 3, params, { title: "Board with Markdown", description: "Required context", status: "active", attachments: [{ filename: "context.md", contentType: "text/markdown", data: Buffer.from("# Board context").toString("base64") }] })).result;
+  assert.equal(withMarkdown.status, "active");
+  assert.equal(withMarkdown.attachments.length, 1);
+  assert.equal(withMarkdown.attachments[0].contentType, "text/markdown");
+  const oldNumber = direct.number;
+  assert.equal((await invoke("/projects/:id", "patch", 2, params, { key: "NEXT" })).status, 403);
+  assert.equal((await invoke("/projects/:id", "patch", 0, params, { key: "NEXT" })).status, 200);
+  const numbered = (await invoke("/projects/:id/tickets", "post", 3, params, { title: "New prefix", description: "Required context" })).result;
+  assert.equal(numbered.number, `NEXT-${Number(withMarkdown.number.split("-").at(-1)) + 1}`);
+  assert.equal((await readState()).tickets.find(item => item.id === direct.id)!.number, oldNumber);
+  const other = (await invoke("/projects", "post", 0, {}, { name: "Other project", key: "OTHER" })).result;
+  assert.equal((await invoke("/projects/:id", "patch", 0, params, { key: "OTHER" })).status, 409);
+  assert.equal((await invoke("/projects/:id/board/tickets", "post", 0, { id: other.id }, { ticketIds: [numbered.id] })).status, 409);
+  const markdownId = randomUUID();
+  await mutate(current => {
+    current.tickets.find(item => item.id === numbered.id)!.attachments.push({ id: markdownId, filename: "notes.md", contentType: "text/markdown", size: 20 });
+    current.attachmentData[markdownId] = Buffer.from("uploaded-needle").toString("base64");
+    current.artifacts.push({ id: randomUUID(), ticketId: numbered.id, stepId: first.id, filename: "notes.md", content: "document-needle", version: 1, updatedAt: new Date().toISOString(), updatedBy: ids[0] });
+  });
+  for (const q of ["uploaded-needle", "document-needle"]) {
+    assert.deepEqual((await invoke("/projects/:id/tickets/search", "get", 3, params, undefined, { q })).result.ticketIds, [numbered.id]);
+    assert.deepEqual((await invoke("/projects/:id/tickets/search", "get", 0, { id: other.id }, undefined, { q })).result.ticketIds, []);
+  }
+  const returned = await invoke("/tickets/:id/backlog", "post", 3, { id: direct.id });
+  assert.equal(returned.result.status, "backlog");
+  assert.equal(returned.result.startedAt, null);
 
 });

@@ -43,7 +43,7 @@ async function queue(kind: "definition" | "implement" = "definition"){
     const project=state.projects.find(project=>project.id===projectId)!;
     let step=project.steps.find(step=>step.kind===kind);
     if(!step){step={...project.steps[0],id:randomUUID(),kind,name:"Implement"};project.steps.push(step);}
-    const timestamp=new Date().toISOString();const ticket={id:randomUUID(),projectId,number:"BOUNDARY-1",title:"Boundary",description:"",attachments:[],workflowSnapshot:null,priority:"medium" as const,status:"active" as const,stepId:step.id,sprintId:null,createdBy:userId,createdAt:timestamp,updatedAt:timestamp,closedAt:null,pullRequests:[]};
+    const timestamp=new Date().toISOString();const ticket={id:randomUUID(),projectId,number:"BOUNDARY-1",title:"Boundary",description:"",attachments:[],workflowSnapshot:null,priority:"medium" as const,status:"active" as const,stepId:step.id,createdBy:userId,createdAt:timestamp,updatedAt:timestamp,closedAt:null,pullRequests:[]};
     state.tickets.push(ticket);return enqueue(state,ticket,step,userId,null,client);
   });
 }

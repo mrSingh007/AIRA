@@ -4,20 +4,21 @@ import type { Request, Response } from "express";
 import { randomUUID } from "node:crypto";
 import { api } from "../src/server/api.js";
 import { pool, mutate, readState } from "../src/server/db.js";
-import { ApiError, canCreateProjects, emptyState, type StoredProject } from "../src/server/state.js";
+import { ApiError, canCreateProjects, emptyState, ensureSystemUser, type StoredProject } from "../src/server/state.js";
 import { hashToken } from "../src/server/security.js";
 
 const user = (id: string) => ({ id, name: "Fixture", email: `${id}@example.test`, passwordHash: "unused", mustChangePassword: false });
 
-test("project creation capability permits project admins and only the first account during bootstrap", () => {
+test("project creation capability belongs only to the protected system user", () => {
   const state = emptyState();
   assert.equal(canCreateProjects(state, "unknown"), false);
   state.users.push(user("first"), user("second"));
+  ensureSystemUser(state);
   assert.equal(canCreateProjects(state, "first"), true);
   assert.equal(canCreateProjects(state, "second"), false);
   state.projects.push({ roles: { first: "member", second: "admin" } } as unknown as StoredProject);
-  assert.equal(canCreateProjects(state, "first"), false);
-  assert.equal(canCreateProjects(state, "second"), true);
+  assert.equal(canCreateProjects(state, "first"), true);
+  assert.equal(canCreateProjects(state, "second"), false);
   assert.equal(canCreateProjects(state, "outsider"), false);
   state.projects[0].roles.second = "member";
   assert.equal(canCreateProjects(state, "second"), false);
@@ -78,7 +79,7 @@ test("POST projects enforces current transaction permissions, authentication, an
     queries.length = 0;
     const response = await create(account, "NEW");
     assert.equal(response.status, 403);
-    assert.match((await response.json()).error, /administrator/);
+    assert.match((await response.json()).error, /system user/);
     assert.ok(queries.includes("ROLLBACK"));
     assert.ok(!queries.some(sql => sql.startsWith("UPDATE") || sql.startsWith("INSERT")));
     assert.deepEqual(await readState(), beforeDenied);
@@ -86,12 +87,17 @@ test("POST projects enforces current transaction permissions, authentication, an
   await mutate(current => { current.projects[0].roles[ids[1]] = "admin"; current.users[1].mustChangePassword = true; });
   assert.equal((await create(1, "NEXT")).status, 403);
   await mutate(current => { current.users[1].mustChangePassword = false; });
-  assert.equal((await session(1)).canCreateProjects, true);
-  const next = await create(1, "NEXT");
+  assert.equal((await session(1)).canCreateProjects, false);
+  assert.equal((await create(1, "NEXT")).status, 403);
+  // Revoking a regular administrator cannot confer or retain project creation.
+  await mutate(current => { current.projects[0].roles[ids[1]] = "member"; });
+  assert.equal((await session(1)).canCreateProjects, false);
+  assert.equal((await create(1, "NEXT")).status, 403);
+  const next = await create(0, "NEXT");
   assert.equal(next.status, 201);
-  assert.equal((await next.json()).roles[ids[0]], undefined);
+  assert.equal((await next.json()).roles[ids[0]], "admin");
   assert.equal((await readState()).projects[1].roles[ids[0]], "admin");
-  assert.equal((await create(1, "NEXT")).status, 409);
+  assert.equal((await create(0, "NEXT")).status, 409);
   const committed = await readState();
   assert.equal(committed.projects.length, 2);
   assert.equal(committed.audit.filter(event => event.action === "project.created").length, 2);

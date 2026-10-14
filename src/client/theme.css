@@ -42,7 +42,6 @@
   --theme-auth-bg:
     radial-gradient(ellipse at 5% 100%, #c5e7d6 0%, transparent 65%), #eaf3ed;
   --theme-auth-form-bg: #f9fbfa;
-  --theme-sprint-bg: linear-gradient(100deg, #e2f2e8, #f4f8f5 66%);
 }
 
 .theme-control {

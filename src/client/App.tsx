@@ -22,7 +22,9 @@ import {
   GitBranch,
   GitPullRequest,
   Layers3,
-  LayoutDashboard,
+  Bot,
+  Maximize2,
+  Minimize2,
   ListTodo,
   LogOut,
   Menu,
@@ -30,7 +32,6 @@ import {
   Search,
   Settings2,
   ShieldCheck,
-  Sparkles,
   X,
   Zap,
 } from "lucide-react";
@@ -46,13 +47,13 @@ import { Avatar, Brand, EmptyState, ErrorNotice, Modal, Spinner } from "./ui";
 import { Config } from "./Config";
 import { Analytics } from "./Analytics";
 import { readSidebarCollapsed, saveSidebarCollapsed } from "./sidebar-state";
-import { doneTickets, sprintTickets } from "./board-tickets";
+import { doneTickets, boardTickets } from "./board-tickets";
 import { TicketDetail } from "./TicketDetail";
 import { ThemeToggle } from "./ThemeProvider";
 import { TicketImages, type ImageDraft } from "./TicketImages";
 import { requiredApprovalCount } from "../shared/workflow";
 
-type View = "sprint" | "backlog" | "done" | "config" | "analytics";
+type View = "board" | "backlog" | "done" | "config" | "analytics";
 
 export default function App() {
   const [session, setSession] = useState<SessionData | null>(null);
@@ -356,7 +357,7 @@ export function ProjectsApp({
       "",
   );
   const [data, setData] = useState<ProjectData | null>(null);
-  const [view, setView] = useState<View>("sprint");
+  const [view, setView] = useState<View>("board");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
@@ -377,8 +378,9 @@ export function ProjectsApp({
     saveSidebarCollapsed(collapsed);
   }
   const [dialog, setDialog] = useState<
-    "project" | "ticket" | "sprint" | null
+    "project" | "ticket" | "add" | null
   >(null);
+  const [ticketExpanded, setTicketExpanded] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState<string | null>(null);
   const [selectedBacklog, setSelectedBacklog] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -425,14 +427,14 @@ export function ProjectsApp({
       : projects.find((item) => item.id === projectId);
   const isAdmin = selectedProject?.roles[session.user.id] === "admin";
   const visibleMembers = data?.members.filter((member) => !member.isSystemUser || member.id === session.user.id) ?? [];
-  const canCreateProjects = session.canCreateProjects;
+  const canCreateProjects = session.user.isSystemUser;
   const canViewAnalytics = !!selectedProject && hasProjectPermission(selectedProject, session.user.id, "analytics");
   const canViewConfig = !!selectedProject && ["peopleRead", "workflowWrite", "generalRead", "sandboxRead"].some((permission) => hasProjectPermission(selectedProject, session.user.id, permission as "peopleRead" | "workflowWrite" | "generalRead" | "sandboxRead"));
   useEffect(() => {
-    if (view === "config" && !canViewConfig) setView("sprint");
+    if (view === "config" && !canViewConfig) setView("board");
   }, [view, canViewConfig]);
   useEffect(() => {
-    if (view === "analytics" && !canViewAnalytics) setView("sprint");
+    if (view === "analytics" && !canViewAnalytics) setView("board");
   }, [view, canViewAnalytics]);
   const refreshSession = useCallback(async () => {
     setSession(await api<SessionData>("/auth/me"));
@@ -526,51 +528,34 @@ export function ProjectsApp({
       const ticket = await api<Ticket>(
         `/projects/${projectId}/tickets`,
         "POST",
-        { ...values, attachments: ticketImages.map((image) => image.input) },
+        { ...values, status: view === "board" ? "active" : "backlog", attachments: ticketImages.map((image) => image.input) },
       );
       await refresh();
       setDialog(null);
+      setTicketExpanded(false);
       setSelectedTicket(ticket.id);
       setTicketImages([]);
-      setNotice(`${ticket.number} added to the backlog.`);
+      setNotice(`${ticket.number} added to ${view === "board" ? "the board" : "Backlog"}.`);
     });
   }
-  async function backlogAction(action: "sprint" | "close") {
+  async function backlogAction(action: "board" | "close") {
     await run(async () => {
       const count = selectedBacklog.length;
-      await api(`/projects/${projectId}/backlog/action`, "POST", {
+      await api(`/projects/${projectId}/${action === "board" ? "board/tickets" : "backlog/action"}`, "POST", {
         ticketIds: selectedBacklog,
-        action,
+        ...(action === "close" ? { action } : {}),
       });
       setSelectedBacklog([]);
+      setDialog(null);
       await refresh();
       setNotice(
         action === "close"
           ? `${count} ticket${count === 1 ? "" : "s"} closed as won’t do and moved to Done.`
-          : `${count} ticket${count === 1 ? "" : "s"} added to the active sprint.`,
+          : `${count} ticket${count === 1 ? "" : "s"} added to the board.`,
       );
     });
   }
-  async function startSprint(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const values = new FormData(event.currentTarget);
-    const name = values.get("name");
-    const description = values.get("description");
-    await run(async () => {
-      await api(`/projects/${projectId}/sprints`, "POST", {
-        name: name || undefined,
-        description: description || "",
-        ticketIds: selectedBacklog,
-      });
-      await refresh();
-      setSelectedBacklog([]);
-      setDialog(null);
-      setView("sprint");
-      setNotice("Your sprint is ready. Unfinished work keeps its progress.");
-    });
-  }
   const project = data?.project;
-  const activeSprint = data?.sprints.find((item) => !item.endedAt);
   const matchedTicketIds = searchResult?.projectId === projectId &&
     searchResult.generation === activeProject.current.generation && searchResult.query === query &&
     searchResult.queryGeneration === activeSearch.current.generation
@@ -583,13 +568,16 @@ export function ProjectsApp({
   const tickets = data?.tickets.filter(matches) || [];
   const backlog = tickets.filter((ticket) => ticket.status === "backlog");
   const done = doneTickets(tickets);
-  const active = sprintTickets(tickets, activeSprint?.id);
+  const active = boardTickets(data?.tickets || []).filter(ticket => !priority || ticket.priority === priority);
+  const reviewerIds = new Set(project?.steps.flatMap(step => step.approverIds) || []);
+  const reviewers = visibleMembers.filter(member => reviewerIds.has(member.id));
   const boardSteps = [...(project?.steps || [])];
   const openCount =
     data?.tickets.filter((ticket) => ticket.status === "active").length || 0;
   const closeDialog = () => {
     if (readingImages || busy) return;
     setDialog(null);
+    setTicketExpanded(false);
     setError("");
     setTicketImages([]);
   };
@@ -698,7 +686,7 @@ export function ProjectsApp({
       )}
       <aside id="project-navigation" aria-label="Project navigation" className={`sidebar ${mobileNav ? "sidebar-open" : ""}`}>
         <div className="sidebar-brand">
-          <Brand />
+          <div><Brand /><small className="brand-tagline">Define with your team. Build with your agent.</small></div>
           <button
             className="icon-button mobile-only"
             aria-label="Close navigation"
@@ -722,8 +710,9 @@ export function ProjectsApp({
               aria-label="Project"
               value={projectId}
               onChange={(event) => {
+                if (event.target.value === "__create") { setDialog("project"); return; }
                 setProjectId(event.target.value);
-                setView("sprint");
+                setView("board");
               }}
             >
               {!projects.length && <option value="">No projects yet</option>}
@@ -732,6 +721,7 @@ export function ProjectsApp({
                   {item.name}
                 </option>
               ))}
+              {canCreateProjects && <option value="__create">Create new project</option>}
             </select>
           </label>
         </div>
@@ -740,9 +730,9 @@ export function ProjectsApp({
           {(
             [
               {
-                id: "sprint",
-                label: "Sprint board",
-                icon: LayoutDashboard,
+                id: "board",
+                label: "Board",
+                icon: Bot,
                 count: openCount,
               },
               {
@@ -785,29 +775,14 @@ export function ProjectsApp({
             >
               <item.icon size={18} />
               <span>{item.label}</span>
-              {item.count ? (
+              {item.count !== undefined ? (
                 <span className="nav-count">{item.count}</span>
               ) : null}
             </button>
           ))}
         </nav>
         <div className="sidebar-lower">
-          <div className="sidebar-note">
-            <Sparkles size={18} />
-            <strong>Ideas become pull requests.</strong>
-            <p>
-              Define with your team.
-              <br />
-              Build with your agent.
-            </p>
-          </div>
           <ThemeToggle />
-          {canCreateProjects && (
-            <button className="nav-item" title="New project" aria-label="New project" onClick={() => setDialog("project")}>
-              <FolderPlus size={17} />
-              <span>New project</span>
-            </button>
-          )}
           <div className="user-row">
             <Avatar name={session.user.name} />
             <div>
@@ -929,7 +904,7 @@ export function ProjectsApp({
               projectId={projectId}
               onTicketSelect={setSelectedTicket}
               onAccessDenied={() => {
-                setView("sprint");
+                setView("board");
                 setError("Analytics access is no longer available for this project.");
                 void refresh().catch((failure) => setError(errorMessage(failure)));
                 void refreshSession().catch((failure) => setError(errorMessage(failure)));
@@ -952,22 +927,22 @@ export function ProjectsApp({
               <div className="page-heading">
                 <div>
                   <span className="eyebrow">
-                    {view === "sprint"
+                    {view === "board"
                       ? "TURN INTENT INTO IMPACT"
                       : view === "backlog"
                         ? "ROOM FOR WHAT’S NEXT"
                         : "PROGRESS, PRESERVED"}
                   </span>
                   <h1>
-                    {view === "sprint"
-                      ? "Sprint board"
+                    {view === "board"
+                      ? "Agentic Kanban Board"
                       : view === "backlog"
                         ? "Backlog"
                         : "Done archive"}
                     <span className="heading-dot">.</span>
                   </h1>
                   <p>
-                    {view === "sprint"
+                    {view === "board"
                       ? "A clear path from the first thought to the final pull request."
                       : view === "backlog"
                         ? "Capture the ideas. Pick the work that matters next."
@@ -981,52 +956,24 @@ export function ProjectsApp({
                       onClick={() => setDialog("ticket")}
                     >
                       <Plus size={17} />
-                      New ticket
+                      {view === "board" ? "Create new ticket" : "New ticket"}
                     </button>
                   )}
-                  {isAdmin && view !== "done" && (
+                  {view === "board" && (
                     <button
                       className="button"
-                      onClick={() => setDialog("sprint")}
+                      onClick={() => setDialog("add")}
                     >
-                      <Zap size={16} />
-                      {activeSprint ? "Start next sprint" : "Start sprint"}
+                      <Plus size={16} />
+                      Add from Backlog
                     </button>
                   )}
                 </div>
               </div>
-              {view === "sprint" && (
-                <div className="sprint-strip">
-                  <div>
-                    <span className="sprint-orb">
-                      <Zap size={17} />
-                    </span>
-                    <div>
-                      <strong>
-                        {activeSprint?.name || "Your next sprint awaits"}
-                      </strong>
-                      {activeSprint?.description && <p className="sprint-description">{activeSprint.description}</p>}
-                      <span>
-                        {activeSprint
-                          ? `Started ${dateLabel(activeSprint.startedAt)} · ${openCount} open ${openCount === 1 ? "ticket" : "tickets"}`
-                          : "Choose tickets from the backlog and bring your next sprint to life."}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="sprint-strip-right">
-                    <div className="avatar-stack">
-                      {visibleMembers.slice(0, 4).map((member) => (
-                        <Avatar key={member.id} name={member.name} small />
-                      ))}
-                    </div>
-                    <span>
-                      {visibleMembers.length}{" "}
-                      {visibleMembers.length === 1 ? "member" : "members"}
-                    </span>
-                    <span className="badge accent">
-                      {activeSprint ? "In progress" : "Ready when you are"}
-                    </span>
-                  </div>
+              {view === "board" && (
+                <div className="board-members">
+                  <div className="avatar-stack">{reviewers.slice(0, 4).map(member => <Avatar key={member.id} name={member.name} small />)}</div>
+                  <span>{reviewers.length} {reviewers.length === 1 ? "member" : "members"}</span>
                 </div>
               )}
               <div className="filter-bar">
@@ -1054,7 +1001,7 @@ export function ProjectsApp({
                   ))}
                 </select>
                 <span className="filter-count">
-                  {view === "sprint"
+                  {view === "board"
                     ? active.length
                     : view === "backlog"
                       ? backlog.length
@@ -1067,16 +1014,11 @@ export function ProjectsApp({
                   <strong>{selectedBacklog.length} selected</strong>
                   <button
                     className="button primary"
-                    disabled={busy || !activeSprint}
-                    title={
-                      !activeSprint
-                        ? "An administrator must start a sprint first."
-                        : undefined
-                    }
-                    onClick={() => void backlogAction("sprint")}
+                    disabled={busy}
+                    onClick={() => void backlogAction("board")}
                   >
                     <Plus size={15} />
-                    Add to active sprint
+                    Add to Board
                   </button>
                   <button
                     className="button"
@@ -1095,7 +1037,7 @@ export function ProjectsApp({
                   </button>
                 </div>
               )}
-              {view === "sprint" ? (
+              {view === "board" ? (
                 <div className="board">
                   {boardSteps.map((column, index) => {
                     const cards = active.filter(
@@ -1136,6 +1078,7 @@ export function ProjectsApp({
                               key={ticket.id}
                               ticket={ticket}
                               data={data}
+                              highlighted={!!query.trim() && matches(ticket)}
                               open={() => setSelectedTicket(ticket.id)}
                             />
                           ))}
@@ -1143,7 +1086,7 @@ export function ProjectsApp({
                             <div className="empty-column">
                               <span className="empty-column-mark">+</span>
                               <span>
-                                {column.kind === "sprint"
+                                {column.kind === "parking"
                                   ? "Ready for your next idea"
                                   : "A little space for progress"}
                               </span>
@@ -1195,7 +1138,7 @@ export function ProjectsApp({
                       <div className="table-heading">
                         <span>
                           {view === "backlog"
-                            ? `${selectedBacklog.length ? `${selectedBacklog.length} selected` : "Select tickets to add to the active sprint or close"}`
+                            ? `${selectedBacklog.length ? `${selectedBacklog.length} selected` : "Select tickets to add to the Board or close"}`
                             : "Closed tickets"}
                         </span>
                         <span>Priority</span>
@@ -1260,15 +1203,9 @@ export function ProjectsApp({
                   )}
                 </div>
               )}
-              <div className="project-footer">
-                <span>
-                  <ShieldCheck size={13} />
-                  Every step, decision, and conversation stays with your ticket.
-                </span>
-                <span>Kangentix / {project?.key}</span>
-              </div>
             </>
           )}
+          <footer className="project-footer"><span><img src="/kangentix-logo.svg" alt="" width="18" height="18" />Every step, decision, and conversation stays with your ticket.</span><a href="https://github.com/mrSingh007/Kangentix" target="_blank" rel="noreferrer">© Kangentix</a></footer>
         </div>
       </main>
       {dialog && (dialog !== "project" || canCreateProjects) && (
@@ -1278,10 +1215,10 @@ export function ProjectsApp({
               ? "Create a project"
               : dialog === "ticket"
                 ? "A new idea starts here"
-                : activeSprint
-                  ? "Start your next sprint"
-                  : "Start your first sprint"
+                : "Add from Backlog"
           }
+          fullScreen={dialog === "ticket" && ticketExpanded}
+          headerAside={dialog === "ticket" ? <button className="icon-button" aria-label={ticketExpanded ? "Collapse" : "Expand"} title={ticketExpanded ? "Collapse" : "Expand"} onClick={() => setTicketExpanded(value => !value)}>{ticketExpanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}</button> : undefined}
           close={closeDialog}
         >
           <form
@@ -1291,7 +1228,7 @@ export function ProjectsApp({
                 ? createProject
                 : dialog === "ticket"
                   ? createTicket
-                  : startSprint
+                  : (event) => { event.preventDefault(); void backlogAction("board"); }
             }
           >
             <ErrorNotice message={error} />
@@ -1344,6 +1281,7 @@ export function ProjectsApp({
                   Description
                   <textarea
                     name="description"
+                    required
                     rows={5}
                     placeholder="Add context, desired behavior, and anything the team should know. Markdown is supported."
                   />
@@ -1364,50 +1302,20 @@ export function ProjectsApp({
                   </select>
                 </label>
                 <p className="form-hint">
-                  Your ticket starts in Backlog. Select it for your next sprint
-                  when it’s ready.
+                  {view === "board" ? "Your ticket enters the first workflow step on the Board." : "Your ticket starts in Backlog. Add it to the Board when it’s ready."}
                 </p>
               </>
             ) : (
               <>
-                <label>
-                  Sprint name
-                  <input
-                    name="name"
-                    placeholder={`Sprint ${(data?.sprints.length || 0) + 1}`}
-                    maxLength={100}
-                  />
-                </label>
-                <label>
-                  Sprint description <span className="muted">(optional)</span>
-                  <input
-                    name="description"
-                    placeholder="Goal, target end date, or notes for the team"
-                    maxLength={2000}
-                  />
-                </label>
-                <div className="info-box">
-                  <Zap size={18} />
-                  <div>
-                    <strong>
-                      {selectedBacklog.length} backlog{" "}
-                      {selectedBacklog.length === 1 ? "ticket" : "tickets"}{" "}
-                      selected
-                    </strong>
-                    <p>
-                      {openCount
-                        ? `${openCount} unfinished ${openCount === 1 ? "ticket carries" : "tickets carry"} over with current steps, approvals, and conversations intact.`
-                        : "Select any backlog tickets below to include them."}
-                    </p>
-                  </div>
-                </div>
-                <div className="sprint-picker">
+                {!data?.tickets.some(ticket => ticket.status === "backlog") && <p className="muted">No backlog tickets are available. Create a new ticket to add work to the Board.</p>}
+                <div className="backlog-picker">
                   {data?.tickets
                     .filter((ticket) => ticket.status === "backlog")
                     .map((ticket) => (
                       <label className="check-row" key={ticket.id}>
                         <input
                           type="checkbox"
+                          disabled={busy}
                           checked={selectedBacklog.includes(ticket.id)}
                           onChange={(event) =>
                             setSelectedBacklog((current) =>
@@ -1432,7 +1340,7 @@ export function ProjectsApp({
               </button>
               <button
                 className="button primary"
-                disabled={busy || readingImages}
+                disabled={busy || readingImages || (dialog === "add" && !selectedBacklog.length)}
               >
                 {busy ? (
                   <Spinner label="Saving…" />
@@ -1441,7 +1349,7 @@ export function ProjectsApp({
                 ) : dialog === "ticket" ? (
                   "Create ticket"
                 ) : (
-                  "Start sprint"
+                  "Add to Board"
                 )}
               </button>
             </div>
@@ -1487,7 +1395,9 @@ function TicketCard({
   ticket,
   data,
   open,
+  highlighted = false,
 }: {
+  highlighted?: boolean;
   ticket: Ticket;
   data: ProjectData;
   open: () => void;
@@ -1511,7 +1421,7 @@ function TicketCard({
   const required = step ? requiredApprovalCount(step) : 0;
   return (
     <article
-      className={`ticket-card ${ticket.status === "closed" ? "ticket-card-done" : ""}`}
+      className={`ticket-card ${ticket.status === "closed" ? "ticket-card-done" : ""} ${highlighted ? "ticket-card-match" : ""}`}
     >
       <button className="ticket-card-open" onClick={open}>
         <div className="ticket-card-top">
@@ -1541,7 +1451,7 @@ function TicketCard({
             <span className="quiet-label">
               {step && required > approvals
                 ? "Awaiting approval"
-                : step?.kind === "sprint"
+                : step?.kind === "parking"
                   ? "Ready to begin"
                   : "Ready for the next step"}
             </span>

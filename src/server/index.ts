@@ -30,8 +30,8 @@ async function main() {
     next();
   });
   app.use("/api", protectOrigin);
-  // Only ticket writes accept image payloads (five 2 MiB images plus base64 overhead).
-  const ticketJson = express.json({ limit: "15mb" });
+  // Ticket writes accept five images and five Markdown files (2 MiB each, plus base64 overhead).
+  const ticketJson = express.json({ limit: "30mb" });
   const defaultJson = express.json({ limit: "1mb" });
   app.use((req, res, next) => {
     const ticketWrite =
@@ -79,7 +79,7 @@ async function main() {
           .status(413)
           .json({
             error:
-              "The request is too large. Ticket images allow up to 5 files of 2 MiB each; other requests allow 1 MiB.",
+              "The request is too large. Tickets allow up to 5 images and 5 Markdown files of 2 MiB each; other requests allow 1 MiB.",
           });
       // Never return raw database errors, stack traces, or connection strings.
       console.error("API request failed with an internal error.");

@@ -19,7 +19,7 @@ function render(permissions: ProjectPermission[], workflowLocked = false) {
       { id: "other", name: "Other", email: "other@example.test", mustChangePassword: false, role: "member" },
       { id: "system", name: "System", email: "system@example.test", mustChangePassword: false, role: "admin", isSystemUser: true },
     ],
-    sprints: [], tickets: [], artifacts: [], approvals: [], threads: [], messages: [], runs: [], audit: [], workflowLocked,
+    tickets: [], artifacts: [], approvals: [], threads: [], messages: [], runs: [], audit: [], workflowLocked,
   };
   return renderToStaticMarkup(<Config data={data} userId="member" refresh={async () => {}} notify={() => {}} setError={() => {}} />);
 }
@@ -57,12 +57,14 @@ test("General write sees only essentials and repository settings", () => {
   const html = render(["generalWrite"]);
   assert.match(html, /The essentials|GitHub repository/);
   assert.match(html, /Save general settings/);
+  assert.match(html, /Ticket prefix<input required="" maxLength="10" pattern="\[A-Za-z\]\[A-Za-z0-9\]\{1,9\}" value="TEAM"/);
+  assert.doesNotMatch(html, /Ticket prefixes are permanent/);
   assert.doesNotMatch(html, /Your project team|Save workflow|Models &amp; credentials|Agent sandbox/);
 });
 
 test("General read sees all general fields disabled and no save or connect action", () => {
   const html = render(["generalRead"]);
-  assert.match(html, /The essentials|GitHub repository|Ticket prefixes are permanent/);
+  assert.match(html, /Ticket prefix/);
   assert.match(html, /<fieldset class="config-panel-fieldset" disabled=""/);
   assert.doesNotMatch(html, /Save general settings|Connect GitHub|Verify connection/);
 });

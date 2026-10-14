@@ -19,7 +19,7 @@ export interface Member extends User {
 export interface Step {
   id: string;
   name: string;
-  kind: "sprint" | "manual" | "definition" | "implement";
+  kind: "parking" | "manual" | "definition" | "implement";
   instructions: string;
   model: string;
   requiredApprovals: number;
@@ -52,21 +52,10 @@ export interface Project {
   hasClaudeKey: boolean;
   hasE2bKey: boolean;
 }
-export interface Sprint {
-  id: string;
-  projectId: string;
-  name: string;
-  description?: string;
-  ticketIds?: string[];
-  carriedTicketIds?: string[];
-  completedAt?: string | null;
-  startedAt: string;
-  endedAt: string | null;
-}
 export interface TicketAttachment {
   id: string;
   filename: string;
-  contentType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+  contentType: "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "text/markdown";
   size: number;
 }
 export type TicketAttachmentInput =
@@ -93,7 +82,6 @@ export interface Ticket {
   priority: "low" | "medium" | "high" | "urgent";
   status: "backlog" | "active" | "closed";
   stepId: string | null;
-  sprintId: string | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -165,7 +153,6 @@ export interface AuditEvent {
 export interface ProjectData {
   project: Project;
   members: Member[];
-  sprints: Sprint[];
   tickets: Ticket[];
   artifacts: Artifact[];
   approvals: Approval[];
@@ -225,24 +212,22 @@ export interface RunLogData {
 export interface AnalyticsData {
   summary: {
     completedTickets: number;
+    averageWeeklyCloseRate: number;
     averageCycleMs: number | null;
     medianCycleMs: number | null;
     averageLeadMs: number | null;
     activeTickets: number;
     averageActiveAgeMs: number | null;
   };
-  sprints: Array<{
-    id: string; name: string; description: string; startedAt: string;
-    endedAt: string | null; completedAt: string | null; elapsedMs: number | null;
-    ticketCount: number; completedTickets: number; remainingTickets: number; carriedTickets: number;
-  }>;
+  closeRatePeriod: { startedAt: string; endedAt: string; weeks: number; completedTickets: number };
+  priorityCounts: Array<{ priority: Ticket["priority"]; backlog: number; active: number; total: number }>;
   completedTickets: Array<{
-    id: string; number: string; title: string; sprintId: string | null;
+    id: string; number: string; title: string;
     createdAt: string; startedAt: string | null; closedAt: string;
     cycleMs: number | null; leadMs: number | null;
   }>;
   activeTickets: Array<{
-    id: string; number: string; title: string; sprintId: string | null;
+    id: string; number: string; title: string;
     startedAt: string | null; ageMs: number | null;
   }>;
 }

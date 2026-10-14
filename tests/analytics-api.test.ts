@@ -9,7 +9,7 @@ import { hashToken } from "../src/server/security.js";
 
 const user = (id: string) => ({ id, name: "Fixture", email: `${id}@example.test`, passwordHash: "unused", mustChangePassword: false });
 
-test("analytics API checks grants on every request and records sprint descriptions, cycle starts, carry and Done", async (t) => {
+test("analytics API checks grants on every request and records board entry, return and Done", async (t) => {
   const state = emptyState();
   const ids = [randomUUID(), randomUUID(), randomUUID()];
   const tokens = ids.map((_, index) => String(index + 1).repeat(64));
@@ -54,19 +54,11 @@ test("analytics API checks grants on every request and records sprint descriptio
   await grant(0, []);
   assert.equal((await analytics(1)).status, 403);
   await grant(0, [ids[1]]);
-  const createTicket = async () => (await invoke("/projects/:id/tickets", "post", 1, { id: projectId }, { title: "Task" })).result;
+  const createTicket = async () => (await invoke("/projects/:id/tickets", "post", 1, { id: projectId }, { title: "Task", description: "Ticket context" })).result;
   const ticket = await createTicket();
-  await assert.rejects(() => invoke("/projects/:id/sprints", "post", 0, { id: projectId }, { description: "x".repeat(2001), ticketIds: [ticket.id] }));
-  const sprint = await invoke("/projects/:id/sprints", "post", 0, { id: projectId }, { name: "Sprint", description: "Goal by Friday", ticketIds: [ticket.id] });
-  assert.equal(sprint.status, 201);
-  assert.equal(sprint.result.description, "Goal by Friday");
-  const initialStart = (await readState()).tickets[0].startedAt;
-  assert.ok(initialStart);
-  const carry = await invoke("/projects/:id/sprints", "post", 0, { id: projectId }, { ticketIds: [] });
-  assert.equal(carry.result.description, "");
-  assert.deepEqual(carry.result.carriedTicketIds, [ticket.id]);
-  assert.equal((await readState()).tickets[0].startedAt, initialStart);
-  assert.deepEqual((await readState()).sprints[0].ticketIds, [ticket.id]);
+  const admitted = await invoke("/projects/:id/board/tickets", "post", 1, { id: projectId }, { ticketIds: [ticket.id] });
+  assert.equal(admitted.status, 200);
+  assert.ok((await readState()).tickets[0].startedAt);
   const returned = await invoke("/tickets/:id/backlog", "post", 1, { id: ticket.id });
   assert.equal(returned.result.startedAt, null);
   await invoke("/tickets/:id/next", "post", 1, { id: ticket.id });
@@ -82,7 +74,6 @@ test("analytics API checks grants on every request and records sprint descriptio
   const done = await invoke("/tickets/:id/next", "post", 1, { id: ticket.id });
   assert.equal(done.result.status, "closed");
   assert.ok(done.result.closedAt);
-  assert.ok((await readState()).sprints[1].completedAt);
   assert.equal((await analytics(1)).result.summary.completedTickets, 1);
   await invoke("/projects/:id/members/:userId", "delete", 0, { id: projectId, userId: ids[1] });
   assert.equal((await analytics(1)).status, 404);
