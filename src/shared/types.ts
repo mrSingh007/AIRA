@@ -1,6 +1,7 @@
 export const DEFAULT_MAX_CONCURRENT_RUNS = 100;
 export const DEFAULT_E2B_TEMPLATE = "claude";
 export type Role = "admin" | "member";
+export type ProjectPermission = "analytics" | "peopleRead" | "peopleWrite" | "workflowWrite" | "generalRead" | "generalWrite" | "sandboxRead" | "sandboxWrite";
 export type ModelProvider = "ollama" | "claude";
 export type SandboxProvider = "docker" | "e2b";
 export type RunStatus = "pending" | "running" | "completed" | "failed";
@@ -9,9 +10,11 @@ export interface User {
   name: string;
   email: string;
   mustChangePassword: boolean;
+  isSystemUser?: boolean;
 }
 export interface Member extends User {
   role: Role;
+  permissions?: ProjectPermission[];
 }
 export interface Step {
   id: string;
@@ -21,6 +24,7 @@ export interface Step {
   model: string;
   requiredApprovals: number;
   approverIds: string[];
+  hiddenApproverCount?: number;
   includePriorArtifacts: boolean;
   filename: string;
 }
@@ -39,6 +43,9 @@ export interface Project {
   e2bTemplate: string;
   steps: Step[];
   roles: Record<string, Role>;
+  memberPermissions?: Record<string, ProjectPermission[]>;
+  permissionVersion?: 2;
+  analyticsMemberIds?: string[];
   githubConnected: boolean;
   githubIdentity: string;
   hasOllamaKey: boolean;
@@ -49,6 +56,10 @@ export interface Sprint {
   id: string;
   projectId: string;
   name: string;
+  description?: string;
+  ticketIds?: string[];
+  carriedTicketIds?: string[];
+  completedAt?: string | null;
   startedAt: string;
   endedAt: string | null;
 }
@@ -87,6 +98,7 @@ export interface Ticket {
   createdAt: string;
   updatedAt: string;
   closedAt: string | null;
+  startedAt?: string | null;
   pullRequests: TicketPullRequest[];
 }
 export interface Artifact {
@@ -104,6 +116,7 @@ export interface Approval {
   ticketId: string;
   stepId: string;
   userId: string;
+  anonymous?: boolean;
   createdAt: string;
 }
 export interface Thread {
@@ -164,6 +177,7 @@ export interface ProjectData {
 }
 export interface SessionData {
   user: User;
+  canCreateProjects: boolean;
   projects: Project[];
 }
 export interface RunContext {
@@ -206,4 +220,29 @@ export interface RunLogData {
   version: number;
   unchanged: boolean;
   sealed: boolean;
+}
+
+export interface AnalyticsData {
+  summary: {
+    completedTickets: number;
+    averageCycleMs: number | null;
+    medianCycleMs: number | null;
+    averageLeadMs: number | null;
+    activeTickets: number;
+    averageActiveAgeMs: number | null;
+  };
+  sprints: Array<{
+    id: string; name: string; description: string; startedAt: string;
+    endedAt: string | null; completedAt: string | null; elapsedMs: number | null;
+    ticketCount: number; completedTickets: number; remainingTickets: number; carriedTickets: number;
+  }>;
+  completedTickets: Array<{
+    id: string; number: string; title: string; sprintId: string | null;
+    createdAt: string; startedAt: string | null; closedAt: string;
+    cycleMs: number | null; leadMs: number | null;
+  }>;
+  activeTickets: Array<{
+    id: string; number: string; title: string; sprintId: string | null;
+    startedAt: string | null; ageMs: number | null;
+  }>;
 }

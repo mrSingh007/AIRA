@@ -10,6 +10,9 @@ import {
   ArrowRight,
   ArrowUp,
   Archive,
+  BarChart3,
+  PanelLeftClose,
+  PanelLeftOpen,
   Check,
   ChevronRight,
   Circle,
@@ -37,15 +40,19 @@ import type {
   SessionData,
   Ticket,
 } from "../shared/types";
+import { hasProjectPermission } from "../shared/permissions";
 import { api, ApiError, dateLabel, errorMessage, remembered } from "./api";
 import { Avatar, Brand, EmptyState, ErrorNotice, Modal, Spinner } from "./ui";
 import { Config } from "./Config";
+import { Analytics } from "./Analytics";
+import { readSidebarCollapsed, saveSidebarCollapsed } from "./sidebar-state";
+import { doneTickets, sprintTickets } from "./board-tickets";
 import { TicketDetail } from "./TicketDetail";
 import { ThemeToggle } from "./ThemeProvider";
 import { TicketImages, type ImageDraft } from "./TicketImages";
 import { requiredApprovalCount } from "../shared/workflow";
 
-type View = "sprint" | "backlog" | "done" | "config";
+type View = "sprint" | "backlog" | "done" | "config" | "analytics";
 
 export default function App() {
   const [session, setSession] = useState<SessionData | null>(null);
@@ -333,7 +340,7 @@ function PasswordReset({
   );
 }
 
-function ProjectsApp({
+export function ProjectsApp({
   session,
   setSession,
   logout,
@@ -364,6 +371,11 @@ function ProjectsApp({
   }
   const [priority, setPriority] = useState("");
   const [mobileNav, setMobileNav] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
+  function setSidebarCompact(collapsed: boolean) {
+    setSidebarCollapsed(collapsed);
+    saveSidebarCollapsed(collapsed);
+  }
   const [dialog, setDialog] = useState<
     "project" | "ticket" | "sprint" | null
   >(null);
@@ -412,9 +424,16 @@ function ProjectsApp({
       ? data.project
       : projects.find((item) => item.id === projectId);
   const isAdmin = selectedProject?.roles[session.user.id] === "admin";
+  const visibleMembers = data?.members.filter((member) => !member.isSystemUser || member.id === session.user.id) ?? [];
+  const canCreateProjects = session.canCreateProjects;
+  const canViewAnalytics = !!selectedProject && hasProjectPermission(selectedProject, session.user.id, "analytics");
+  const canViewConfig = !!selectedProject && ["peopleRead", "workflowWrite", "generalRead", "sandboxRead"].some((permission) => hasProjectPermission(selectedProject, session.user.id, permission as "peopleRead" | "workflowWrite" | "generalRead" | "sandboxRead"));
   useEffect(() => {
-    if (view === "config" && !isAdmin) setView("sprint");
-  }, [view, isAdmin]);
+    if (view === "config" && !canViewConfig) setView("sprint");
+  }, [view, canViewConfig]);
+  useEffect(() => {
+    if (view === "analytics" && !canViewAnalytics) setView("sprint");
+  }, [view, canViewAnalytics]);
   const refreshSession = useCallback(async () => {
     setSession(await api<SessionData>("/auth/me"));
   }, [setSession]);
@@ -490,6 +509,7 @@ function ProjectsApp({
   }
   async function createProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!canCreateProjects) return;
     const values = Object.fromEntries(new FormData(event.currentTarget));
     await run(async () => {
       const created = await api<Project>("/projects", "POST", values);
@@ -533,10 +553,13 @@ function ProjectsApp({
   }
   async function startSprint(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const name = new FormData(event.currentTarget).get("name");
+    const values = new FormData(event.currentTarget);
+    const name = values.get("name");
+    const description = values.get("description");
     await run(async () => {
       await api(`/projects/${projectId}/sprints`, "POST", {
         name: name || undefined,
+        description: description || "",
         ticketIds: selectedBacklog,
       });
       await refresh();
@@ -559,30 +582,9 @@ function ProjectsApp({
     (!priority || ticket.priority === priority);
   const tickets = data?.tickets.filter(matches) || [];
   const backlog = tickets.filter((ticket) => ticket.status === "backlog");
-  const done = tickets
-    .filter(
-      (ticket) =>
-        ticket.status === "closed" &&
-        (!ticket.sprintId || ticket.sprintId !== activeSprint?.id),
-    )
-    .sort((a, b) => (b.closedAt || "").localeCompare(a.closedAt || ""));
-  const active = tickets.filter(
-    (ticket) =>
-      ticket.status !== "backlog" && ticket.sprintId === activeSprint?.id,
-  );
+  const done = doneTickets(tickets);
+  const active = sprintTickets(tickets, activeSprint?.id);
   const boardSteps = [...(project?.steps || [])];
-  for (const ticket of data?.tickets || []) {
-    if (
-      ticket.status !== "closed" ||
-      ticket.sprintId !== activeSprint?.id ||
-      boardSteps.some((step) => step.id === ticket.stepId)
-    )
-      continue;
-    const completedStep = ticket.workflowSnapshot?.find(
-      (step) => step.id === ticket.stepId,
-    );
-    if (completedStep) boardSteps.push(completedStep);
-  }
   const openCount =
     data?.tickets.filter((ticket) => ticket.status === "active").length || 0;
   const closeDialog = () => {
@@ -591,17 +593,41 @@ function ProjectsApp({
     setError("");
     setTicketImages([]);
   };
+  if (!projects.length && !canCreateProjects)
+    return (
+      <div className="center-page">
+        <div className="theme-floating">
+          <ThemeToggle />
+        </div>
+        <div className="onboarding-card project-onboarding">
+          <Brand />
+          <span className="eyebrow">PROJECT ACCESS</span>
+          <h1>Your team is one step away.</h1>
+          <p className="muted">
+            Ask a project administrator to add you to a project before getting started.
+          </p>
+          <button
+            className="button text-button"
+            onClick={() => void run(async () => {
+              await api("/auth/logout", "POST");
+              logout();
+            })}
+            disabled={busy}
+          >
+            Sign out
+          </button>
+          <ErrorNotice message={error} />
+        </div>
+      </div>
+    );
   if (!projects.length)
     return (
       <div className="center-page">
         <div className="theme-floating">
           <ThemeToggle />
         </div>
-        <div className="onboarding-card">
+        <div className="onboarding-card project-onboarding">
           <Brand />
-          <div className="section-icon">
-            <Layers3 />
-          </div>
           <span className="eyebrow">YOUR TEAM STARTS HERE</span>
           <h1>A place for your next idea.</h1>
           <p className="muted">
@@ -666,11 +692,11 @@ function ProjectsApp({
       </div>
     );
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${sidebarCollapsed ? "sidebar-is-collapsed" : ""}`}>
       {mobileNav && (
         <div className="sidebar-shade" onClick={() => setMobileNav(false)} />
       )}
-      <aside className={`sidebar ${mobileNav ? "sidebar-open" : ""}`}>
+      <aside id="project-navigation" aria-label="Project navigation" className={`sidebar ${mobileNav ? "sidebar-open" : ""}`}>
         <div className="sidebar-brand">
           <Brand />
           <button
@@ -681,6 +707,14 @@ function ProjectsApp({
             <X size={20} />
           </button>
         </div>
+        <button
+          className="project-switcher-compact icon-button"
+          aria-label={`Switch project: ${selectedProject?.name || "Projects"}`}
+          title={`Switch project: ${selectedProject?.name || "Projects"}`}
+          onClick={() => setSidebarCompact(false)}
+        >
+          <FolderPlus size={18} />
+        </button>
         <div className="project-switcher">
           <label className="selector-label">
             PROJECT
@@ -720,7 +754,10 @@ function ProjectsApp({
                 ).length,
               },
               { id: "done", label: "Done", icon: Archive, count: undefined },
-              ...(isAdmin
+              ...(canViewAnalytics
+                ? [{ id: "analytics", label: "Analytics", icon: BarChart3, count: undefined } as const]
+                : []),
+              ...(canViewConfig
                 ? [
                     {
                       id: "config",
@@ -735,6 +772,9 @@ function ProjectsApp({
             <button
               key={item.id}
               className={`nav-item ${view === item.id ? "active" : ""}`}
+              title={item.label}
+              aria-label={item.label}
+              aria-current={view === item.id ? "page" : undefined}
               onClick={() => {
                 setView(item.id);
                 setQuery("");
@@ -762,10 +802,12 @@ function ProjectsApp({
             </p>
           </div>
           <ThemeToggle />
-          <button className="nav-item" onClick={() => setDialog("project")}>
-            <FolderPlus size={17} />
-            <span>New project</span>
-          </button>
+          {canCreateProjects && (
+            <button className="nav-item" title="New project" aria-label="New project" onClick={() => setDialog("project")}>
+              <FolderPlus size={17} />
+              <span>New project</span>
+            </button>
+          )}
           <div className="user-row">
             <Avatar name={session.user.name} />
             <div>
@@ -791,6 +833,16 @@ function ProjectsApp({
       <main className="main-area">
         <header className="topbar">
           <div className="breadcrumb">
+            <button
+              className="icon-button sidebar-toggle"
+              aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-expanded={!sidebarCollapsed}
+              aria-controls="project-navigation"
+              onClick={() => setSidebarCompact(!sidebarCollapsed)}
+            >
+              {sidebarCollapsed ? <PanelLeftOpen size={20} /> : <PanelLeftClose size={20} />}
+            </button>
             <button
               className="icon-button mobile-only"
               aria-label="Open navigation"
@@ -871,7 +923,19 @@ function ProjectsApp({
             >
               The project could not be loaded. Check the message above.
             </EmptyState>
-          ) : view === "config" && isAdmin ? (
+          ) : view === "analytics" && canViewAnalytics ? (
+            <Analytics
+              key={projectId}
+              projectId={projectId}
+              onTicketSelect={setSelectedTicket}
+              onAccessDenied={() => {
+                setView("sprint");
+                setError("Analytics access is no longer available for this project.");
+                void refresh().catch((failure) => setError(errorMessage(failure)));
+                void refreshSession().catch((failure) => setError(errorMessage(failure)));
+              }}
+            />
+          ) : view === "config" && canViewConfig ? (
             <Config
               key={projectId}
               data={data}
@@ -941,6 +1005,7 @@ function ProjectsApp({
                       <strong>
                         {activeSprint?.name || "Your next sprint awaits"}
                       </strong>
+                      {activeSprint?.description && <p className="sprint-description">{activeSprint.description}</p>}
                       <span>
                         {activeSprint
                           ? `Started ${dateLabel(activeSprint.startedAt)} · ${openCount} open ${openCount === 1 ? "ticket" : "tickets"}`
@@ -950,13 +1015,13 @@ function ProjectsApp({
                   </div>
                   <div className="sprint-strip-right">
                     <div className="avatar-stack">
-                      {data.members.slice(0, 4).map((member) => (
+                      {visibleMembers.slice(0, 4).map((member) => (
                         <Avatar key={member.id} name={member.name} small />
                       ))}
                     </div>
                     <span>
-                      {data.members.length}{" "}
-                      {data.members.length === 1 ? "member" : "members"}
+                      {visibleMembers.length}{" "}
+                      {visibleMembers.length === 1 ? "member" : "members"}
                     </span>
                     <span className="badge accent">
                       {activeSprint ? "In progress" : "Ready when you are"}
@@ -1123,7 +1188,7 @@ function ProjectsApp({
                         ? "Try a different search or adjust your filters."
                         : view === "backlog"
                           ? "Capture a task, a fix, or a feature to get started."
-                          : "Completed sprint tickets move here when the next sprint starts. Tickets closed from Backlog appear here immediately."}
+                          : "Tickets marked Done or closed from Backlog appear here immediately."}
                     </EmptyState>
                   ) : (
                     <>
@@ -1200,13 +1265,13 @@ function ProjectsApp({
                   <ShieldCheck size={13} />
                   Every step, decision, and conversation stays with your ticket.
                 </span>
-                <span>AIRA / {project?.key}</span>
+                <span>Kangentix / {project?.key}</span>
               </div>
             </>
           )}
         </div>
       </main>
-      {dialog && (
+      {dialog && (dialog !== "project" || canCreateProjects) && (
         <Modal
           title={
             dialog === "project"
@@ -1311,6 +1376,14 @@ function ProjectsApp({
                     name="name"
                     placeholder={`Sprint ${(data?.sprints.length || 0) + 1}`}
                     maxLength={100}
+                  />
+                </label>
+                <label>
+                  Sprint description <span className="muted">(optional)</span>
+                  <input
+                    name="description"
+                    placeholder="Goal, target end date, or notes for the team"
+                    maxLength={2000}
                   />
                 </label>
                 <div className="info-box">
@@ -1431,7 +1504,7 @@ function TicketCard({
         (item) =>
           item.ticketId === ticket.id &&
           item.stepId === ticket.stepId &&
-          step?.approverIds.includes(item.userId),
+          (step?.approverIds.includes(item.userId) || (item.anonymous && !!step?.hiddenApproverCount)),
       )
       .map((item) => item.userId),
   ).size;

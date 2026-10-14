@@ -17,14 +17,14 @@ import { openRunLog, readRunLogs, logBufferUsage, TOTAL_LOG_BUFFER_LIMIT, flushR
 import { api } from '../src/server/api.js';
 import type { RunContext, RunResult, Ticket } from '../src/shared/types.js';
 
-const enabled=process.env.AIRA_TEST_DATABASE_URL;
+const enabled=process.env.KANGENTIX_TEST_DATABASE_URL;
 if(enabled) process.env.DATABASE_URL=enabled; // pool URL must also be provided before module import
 const wait=async(fn:()=>boolean|Promise<boolean>,timeout=15000)=>{const start=Date.now();while(!await fn()){if(Date.now()-start>timeout)throw new Error('Timed out waiting for worker');await new Promise(r=>setTimeout(r,20));}};
 const percentile=(samples:number[],p:number)=>[...samples].sort((a,b)=>a-b)[Math.min(samples.length-1,Math.floor(samples.length*p))];
 test('real PostgreSQL: per-project scheduling, live edits, outcome retries, logs, recovery and 100 developers', {skip:!enabled,timeout:180000}, async()=>{
   process.env.APP_SECRET='concurrency-test-secret-32-characters-long';process.env.APP_URL='http://localhost:3000';initializeSecurity();
-  const maxP95Ms=Number(process.env.AIRA_LOAD_MAX_P95_MS ?? '1000');
-  assert(Number.isFinite(maxP95Ms)&&maxP95Ms>0&&maxP95Ms<=15000,'AIRA_LOAD_MAX_P95_MS must be greater than 0 and at most 15000');
+  const maxP95Ms=Number(process.env.KANGENTIX_LOAD_MAX_P95_MS ?? '1000');
+  assert(Number.isFinite(maxP95Ms)&&maxP95Ms>0&&maxP95Ms<=15000,'KANGENTIX_LOAD_MAX_P95_MS must be greater than 0 and at most 15000');
   const testStarted=performance.now();await initializeDatabase(); const unlock=await acquireWorkerLock();
   const prefix=randomUUID();const userId=prefix+'-user';const token='a'.repeat(64);
   const makeProject=(id:string):StoredProject=>({id,name:id,key:id,description:'',repository:'test/repo',baseBranch:'main',model:'fake',modelProvider:"ollama",sandboxProvider:'docker',dockerImage:'fake',e2bTemplate:'',roles:{[userId]:'admin'},githubConnected:true,githubIdentity:'test',hasOllamaKey:true,hasClaudeKey:true,hasE2bKey:true,secrets:{githubToken:encrypt('test-github-secret'),ollamaApiKey:encrypt('test-model-secret'),claudeApiKey:encrypt('test-claude-secret'),e2bApiKey:encrypt('test-e2b-secret')},steps:[{id:'definition',name:'Define',kind:'definition',instructions:'',model:'',requiredApprovals:0,approverIds:[],includePriorArtifacts:false,filename:'definition.md'}]});
@@ -68,8 +68,8 @@ test('real PostgreSQL: per-project scheduling, live edits, outcome retries, logs
     await new Promise<void>(r=>server!.once('listening',r));const address=server.address();assert(address&&typeof address!=='string');const root=`http://127.0.0.1:${address.port}`;
     await Promise.all(Array.from({length:100},async(_,i)=>{
       for(let j=0;j<3;j++){
-        const start=performance.now();const res=await fetch(`${root}/api/projects/${projects[i%2].id}`,{headers:{Cookie:`aira_session=${token}`}});assert.equal(res.status,200);const board=await res.json();samples.reads.push(performance.now()-start);assert(board.artifacts.every((a:any)=>a.content===""));assert.equal(board.messages.length,0);assert.equal(board.runs.some((r:any)=>'logs'in r),false);
-        const writeStart=performance.now();const response=await fetch(`${root}/api/projects/${projects[i%2].id}/tickets`,{method:'POST',headers:{Cookie:`aira_session=${token}`,'Content-Type':'application/json'},body:JSON.stringify({title:`Board action ${i}-${j}`,description:'Ordinary workflow write'})});assert.equal(response.status,201);await response.json();samples.writes.push(performance.now()-writeStart);
+        const start=performance.now();const res=await fetch(`${root}/api/projects/${projects[i%2].id}`,{headers:{Cookie:`kangentix_session=${token}`}});assert.equal(res.status,200);const board=await res.json();samples.reads.push(performance.now()-start);assert(board.artifacts.every((a:any)=>a.content===""));assert.equal(board.messages.length,0);assert.equal(board.runs.some((r:any)=>'logs'in r),false);
+        const writeStart=performance.now();const response=await fetch(`${root}/api/projects/${projects[i%2].id}/tickets`,{method:'POST',headers:{Cookie:`kangentix_session=${token}`,'Content-Type':'application/json'},body:JSON.stringify({title:`Board action ${i}-${j}`,description:'Ordinary workflow write'})});assert.equal(response.status,201);await response.json();samples.writes.push(performance.now()-writeStart);
       }
     }));
     // Lost acknowledgement after successful outcome commit must not execute again or duplicate artifacts/audits.
@@ -78,7 +78,7 @@ test('real PostgreSQL: per-project scheduling, live edits, outcome retries, logs
     const outcomeClients=new WeakSet<object>();
     (pg.Client.prototype as any).query=function(...args:any[]){
       const promise=(originalClientQuery as any).apply(this,args);
-      if(String(args[0]).startsWith('UPDATE aira_runs SET status=$2') && args[1]?.[0]===victim && args[1]?.[1]==='completed')outcomeClients.add(this);
+      if(String(args[0]).startsWith('UPDATE kangentix_runs SET status=$2') && args[1]?.[0]===victim && args[1]?.[1]==='completed')outcomeClients.add(this);
       if(loseCommit&&args[0]==='COMMIT'&&outcomeClients.has(this)){loseCommit=false;return promise.then(()=>{throw new Error('Lost commit acknowledgement');});}
       return promise;
     };
@@ -108,7 +108,7 @@ test('real PostgreSQL: per-project scheduling, live edits, outcome retries, logs
     let prLost=true;const prClients=new WeakSet<object>();const queryBeforePr=pg.Client.prototype.query;
     (pg.Client.prototype as any).query=function(...args:any[]){
       const result=(queryBeforePr as any).apply(this,args);
-      if(String(args[0]).startsWith('UPDATE aira_runs SET status=$2')&&args[1]?.[0]===prRun.id&&args[1]?.[1]==='completed')prClients.add(this);
+      if(String(args[0]).startsWith('UPDATE kangentix_runs SET status=$2')&&args[1]?.[0]===prRun.id&&args[1]?.[1]==='completed')prClients.add(this);
       if(prLost&&args[0]==='COMMIT'&&prClients.has(this)){prLost=false;return result.then(()=>{throw new Error('Lost post-publication COMMIT acknowledgement');});}
       return result;
     };
@@ -125,20 +125,20 @@ test('real PostgreSQL: per-project scheduling, live edits, outcome retries, logs
     const oneReads:number[]=[];const oneWrites:number[]=[];
     const serverAddress=server!.address();assert(serverAddress&&typeof serverAddress!=='string');const oneRoot=`http://127.0.0.1:${serverAddress.port}`;
     await Promise.all(Array.from({length:100},async(_,i)=>{
-      const began=performance.now();const response=await fetch(`${oneRoot}/api/projects/${projects[0].id}`,{headers:{Cookie:`aira_session=${token}`}});assert.equal(response.status,200);await response.json();oneReads.push(performance.now()-began);
-      const writeBegan=performance.now();const result=await fetch(`${oneRoot}/api/projects/${projects[0].id}/tickets`,{method:'POST',headers:{Cookie:`aira_session=${token}`,'Content-Type':'application/json'},body:JSON.stringify({title:`Single-project board action ${i}`})});assert.equal(result.status,201);await result.json();oneWrites.push(performance.now()-writeBegan);
+      const began=performance.now();const response=await fetch(`${oneRoot}/api/projects/${projects[0].id}`,{headers:{Cookie:`kangentix_session=${token}`}});assert.equal(response.status,200);await response.json();oneReads.push(performance.now()-began);
+      const writeBegan=performance.now();const result=await fetch(`${oneRoot}/api/projects/${projects[0].id}/tickets`,{method:'POST',headers:{Cookie:`kangentix_session=${token}`,'Content-Type':'application/json'},body:JSON.stringify({title:`Single-project board action ${i}`})});assert.equal(result.status,201);await result.json();oneWrites.push(performance.now()-writeBegan);
     }));
     singleProject={active:100,readsP95Ms:percentile(oneReads,.95),writesP95Ms:percentile(oneWrites,.95)};
     for(const id of [...deferred.keys()])finish(id);await wait(()=>workerActivity().length===0);await stopWorker(0);
     // Idempotent append retry after UPDATE succeeded but acknowledgement was lost.
     const logRun=await mutate(async(state,client)=>{const ticket={...fixtureTickets[0],id:randomUUID(),number:'LOG-1'};state.tickets.push(ticket);return enqueue(state,ticket,projects[0].steps[0],userId,null,client);});
     const logger=await openRunLog(logRun.id,['private-key']);await logger.write('exactly-once private-key');
-    const originalQuery=pool.query.bind(pool);let lostAppend=true;(pool as any).query=async(...args:any[])=>{const result=await (originalQuery as any)(...args);if(lostAppend&&String(args[0]).startsWith('UPDATE aira_run_logs AS l')){lostAppend=false;throw new Error('Lost log acknowledgement');}return result;};
+    const originalQuery=pool.query.bind(pool);let lostAppend=true;(pool as any).query=async(...args:any[])=>{const result=await (originalQuery as any)(...args);if(lostAppend&&String(args[0]).startsWith('UPDATE kangentix_run_logs AS l')){lostAppend=false;throw new Error('Lost log acknowledgement');}return result;};
     await assert.rejects(logger.flush());await logger.flush();(pool as any).query=originalQuery;assert.equal((await readRunLogs(logRun.id)).tail.match(/exactly-once/g)?.length,1);
-    for(let i=0;i<100;i++)await logger.write('x'.repeat(30000));assert(logBufferUsage().characters<=TOTAL_LOG_BUFFER_LIMIT);await logger.flush();assert((await readRunLogs(logRun.id)).tail.length<=200000);await logger.seal();await pool.query('UPDATE aira_run_logs SET sealed=false WHERE run_id=$1',[logRun.id]);
+    for(let i=0;i<100;i++)await logger.write('x'.repeat(30000));assert(logBufferUsage().characters<=TOTAL_LOG_BUFFER_LIMIT);await logger.flush();assert((await readRunLogs(logRun.id)).tail.length<=200000);await logger.seal();await pool.query('UPDATE kangentix_run_logs SET sealed=false WHERE run_id=$1',[logRun.id]);
     // Restart preserves pending and fails running without repeating execution; pre-resource reservations release.
     await mutate(async(_s,c)=>{await saveConcurrency(projects[0].id,1,c);});const claims=await claimAvailableRuns();assert.equal(claims.length,1);await recoverInterruptedRuns();assert.equal((await getRun(logRun.id))?.status,'failed');assert.equal((await reservationCounts()).get(projects[0].id),undefined);
-    assert.equal((await pool.query('SELECT count(*)::int AS n FROM aira_runs WHERE status=\'running\' AND project_id=ANY($1)',[projects.map(p=>p.id)])).rows[0].n,0);
+    assert.equal((await pool.query('SELECT count(*)::int AS n FROM kangentix_runs WHERE status=\'running\' AND project_id=ANY($1)',[projects.map(p=>p.id)])).rows[0].n,0);
     // Shutdown cancels every admitted job, stops claims, and retains durable pending peers.
     await mutate(async(_state,client)=>{await saveConcurrency(projects[0].id,2,client);await saveConcurrency(projects[1].id,5,client);});
     await addTickets(4);startWorker({execute:fake,pollMs:50});await wait(()=>deferred.size===6);
@@ -149,12 +149,12 @@ test('real PostgreSQL: per-project scheduling, live edits, outcome retries, logs
     for(const runId of pendingBeforeRestart)assert.equal((await getRun(runId))?.status,'pending');
     assert.equal(workerActivity().length,0);assert.equal((await reservationCounts()).size,0);
     const measured={maxP95Ms,durationMs:performance.now()-testStarted,date:new Date().toISOString(),node:process.version,platform:process.platform,architecture:process.arch,hardware:{cpu:os.cpus()[0]?.model,cores:os.cpus().length,memoryBytes:os.totalmem()},dataset:{projects:2,agentTickets:fixtureTickets.length,boardWrites:400},workload:{activePerProject:100,totalActive:200,simulatedDevelopers:100,readSamples:samples.reads.length,writeSamples:samples.writes.length,provider:'deferred fake, PostgreSQL real'},queueAgeMsAtDefaultCapacity:queueAgeMs,verifiedReservationPhases:[{A:100,B:100},{A:100,B:101},{A:100,B:0}],injectedProviderFailures:1,singleProject,p95BoardReadMs:percentile(samples.reads,.95),p95WorkflowWriteMs:percentile(samples.writes,.95),batches,logBufferAfter:logBufferUsage(),databaseMetrics:databaseMetrics()};
-    console.log('LOAD_RESULT '+JSON.stringify(measured));if(process.env.AIRA_LOAD_REPORT)await writeFile(process.env.AIRA_LOAD_REPORT,JSON.stringify(measured,null,2)+'\n');
+    console.log('LOAD_RESULT '+JSON.stringify(measured));if(process.env.KANGENTIX_LOAD_REPORT)await writeFile(process.env.KANGENTIX_LOAD_REPORT,JSON.stringify(measured,null,2)+'\n');
     assert(singleProject!.readsP95Ms<maxP95Ms,`Single-project board p95 ${singleProject!.readsP95Ms}`);assert(singleProject!.writesP95Ms<maxP95Ms,`Single-project workflow p95 ${singleProject!.writesP95Ms}`);
     assert(measured.p95BoardReadMs<maxP95Ms,`Board p95 ${measured.p95BoardReadMs}`);assert(measured.p95WorkflowWriteMs<maxP95Ms,`Workflow p95 ${measured.p95WorkflowWriteMs}`);
   }finally{
     if(server)await new Promise<void>(r=>server!.close(()=>r()));await stopWorker(0);await flushRunLogs();
-    await pool.query('DELETE FROM aira_runs WHERE project_id=ANY($1)',[projects.map(p=>p.id)]);await pool.query('DELETE FROM aira_project_agent_settings WHERE project_id=ANY($1)',[projects.map(p=>p.id)]);
+    await pool.query('DELETE FROM kangentix_runs WHERE project_id=ANY($1)',[projects.map(p=>p.id)]);await pool.query('DELETE FROM kangentix_project_agent_settings WHERE project_id=ANY($1)',[projects.map(p=>p.id)]);
     await mutate(state=>{state.projects=state.projects.filter(p=>!projects.some(x=>x.id===p.id));state.users=state.users.filter(u=>u.id!==userId);state.sessions=state.sessions.filter(s=>s.userId!==userId);const ticketIds=new Set(state.tickets.filter(t=>projects.some(p=>p.id===t.projectId)).map(t=>t.id));state.tickets=state.tickets.filter(t=>!ticketIds.has(t.id));state.artifacts=state.artifacts.filter(a=>!ticketIds.has(a.ticketId));state.audit=state.audit.filter(a=>!projects.some(p=>p.id===a.projectId));});
     await unlock();await closeDatabase();
   }

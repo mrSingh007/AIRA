@@ -36,8 +36,8 @@ function schedule(delay = 500) {
 export async function openRunLog(runId: string, secrets: string[] = []) {
   let stream = streams.get(runId);
   if (!stream) {
-    await pool.query("INSERT INTO aira_run_logs(run_id) VALUES ($1) ON CONFLICT DO NOTHING", [runId]);
-    const result = await pool.query("SELECT last_sequence, sealed FROM aira_run_logs WHERE run_id=$1", [runId]);
+    await pool.query("INSERT INTO kangentix_run_logs(run_id) VALUES ($1) ON CONFLICT DO NOTHING", [runId]);
+    const result = await pool.query("SELECT last_sequence, sealed FROM kangentix_run_logs WHERE run_id=$1", [runId]);
     stream = { pending: "", sequence: Number(result.rows[0].last_sequence), secrets, sealed: result.rows[0].sealed };
     streams.set(runId, stream);
   } else stream.secrets = secrets;
@@ -71,7 +71,7 @@ export async function openRunLog(runId: string, secrets: string[] = []) {
     },
     seal: async () => {
       while (selected.pending || selected.inflight || selected.omitted) await flushRunLogs();
-      await pool.query("UPDATE aira_run_logs SET sealed=true,version=version+1 WHERE run_id=$1 AND NOT sealed", [runId]);
+      await pool.query("UPDATE kangentix_run_logs SET sealed=true,version=version+1 WHERE run_id=$1 AND NOT sealed", [runId]);
       selected.sealed = true;
       streams.delete(runId);
     },
@@ -107,7 +107,7 @@ export function flushRunLogs(): Promise<void> {
     if (!batch.length) return;
     retryBatch = batch;
     // last_sequence makes an acknowledgement lost after COMMIT safe to retry.
-    await pool.query(`UPDATE aira_run_logs AS l SET tail=right(l.tail || b.text,$2),
+    await pool.query(`UPDATE kangentix_run_logs AS l SET tail=right(l.tail || b.text,$2),
       version=l.version+1,last_sequence=b.sequence
       FROM jsonb_to_recordset($1::jsonb) AS b(id text,text text,sequence bigint)
       WHERE l.run_id=b.id AND l.last_sequence < b.sequence AND NOT l.sealed`,
@@ -127,7 +127,7 @@ export function flushRunLogs(): Promise<void> {
   return flushing;
 }
 export async function readRunLogs(runId: string, version?: number) {
-  const result = await pool.query("SELECT tail,version,sealed FROM aira_run_logs WHERE run_id=$1", [runId]);
+  const result = await pool.query("SELECT tail,version,sealed FROM kangentix_run_logs WHERE run_id=$1", [runId]);
   const row = result.rows[0] || { tail: "", version: 0, sealed: false };
   return Number(row.version) === version
     ? { tail: "", version: Number(row.version), sealed: row.sealed, unchanged: true }

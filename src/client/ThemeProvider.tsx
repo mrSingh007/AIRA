@@ -8,7 +8,7 @@ import {
 import { Moon, Sun } from "lucide-react";
 
 type Theme = "dark" | "light";
-const STORAGE_KEY = "aira.theme";
+const STORAGE_KEY = "kangentix.theme";
 const ThemeContext = createContext<{
   theme: Theme;
   selectTheme: (theme: Theme) => void;

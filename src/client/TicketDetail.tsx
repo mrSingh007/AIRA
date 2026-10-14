@@ -288,7 +288,8 @@ function TicketDetailView({
     (approval) =>
       approval.ticketId === ticket.id &&
       approval.stepId === ticket.stepId &&
-      currentStep?.approverIds.includes(approval.userId),
+      (currentStep?.approverIds.includes(approval.userId) ||
+        (approval.anonymous && !!currentStep?.hiddenApproverCount)),
   );
   const ownApproval = currentApprovals.find(
     (approval) => approval.userId === user.id,
@@ -421,6 +422,7 @@ function TicketDetailView({
             <>
               <span
                 title={currentApprovals
+                  .filter((approval) => !approval.anonymous)
                   .map(
                     (approval) =>
                       data.members.find(
@@ -892,7 +894,7 @@ function TicketDetailView({
                                 )?.name ||
                                   (event.userId
                                     ? "Former member"
-                                    : "AIRA")}{" "}
+                                    : "Kangentix")}{" "}
                                 · {dateLabel(event.createdAt)}
                               </small>
                             </div>
@@ -1019,7 +1021,7 @@ function TicketDetailView({
                           Updated {dateLabel(artifact.updatedAt)} ·{" "}
                           {data.members.find(
                             (member) => member.id === artifact.updatedBy,
-                          )?.name || "AIRA"}
+                          )?.name || "Kangentix"}
                         </div>
                       </>
                     ) : (
@@ -1145,7 +1147,7 @@ function TicketDetailView({
                           )}
                           <strong>
                             {message.role === "assistant"
-                              ? "AIRA"
+                              ? "Kangentix"
                               : message.role === "system"
                                 ? "System"
                                 : data.members.find(
@@ -1162,7 +1164,7 @@ function TicketDetailView({
                         <Sparkles size={13} className="pulse" />
                         {activeRun.status === "pending"
                           ? "Waiting for the agent…"
-                          : "AIRA is thinking…"}
+                          : "Kangentix is thinking…"}
                       </div>
                     )}
                   </div>
@@ -1452,7 +1454,7 @@ function TicketDetailView({
                       await api(`/tickets/${ticket.id}/next`, "POST");
                       notify(
                         completesTicket
-                          ? `${ticket.number} marked Done. It stays on this board until the next sprint.`
+                          ? `${ticket.number} marked Done and moved to the Done archive.`
                           : "Ticket moved to the next step.",
                       );
                     })

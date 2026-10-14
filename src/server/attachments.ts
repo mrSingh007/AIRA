@@ -149,5 +149,5 @@ export function attachmentPath(
     400,
     "Invalid ticket image path.",
   );
-  return `docs/aira/${ticketNumber}/images/${attachment.id}.${extension}`;
+  return `docs/kangentix/${ticketNumber}/images/${attachment.id}.${extension}`;
 }

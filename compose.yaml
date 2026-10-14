@@ -1,22 +1,22 @@
-name: aira
+name: kangentix
 services:
   db:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: aira
+      POSTGRES_USER: kangentix
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
-      POSTGRES_DB: aira
+      POSTGRES_DB: kangentix
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U aira -d aira"]
+      test: ["CMD-SHELL", "pg_isready -U kangentix -d kangentix"]
       interval: 5s
       timeout: 5s
       retries: 15
     networks: [database]
   sandbox-image:
-    image: aira-sandbox:local
+    image: kangentix-sandbox:local
     build:
       context: .
       dockerfile: sandbox/Dockerfile
@@ -26,21 +26,21 @@ services:
     restart: "no"
     networks: [outbound]
   app:
-    image: aira:local
+    image: kangentix:local
     stop_grace_period: 100s
     build: .
     restart: unless-stopped
     ports:
-      - "${AIRA_BIND:-127.0.0.1}:${AIRA_PORT:-3000}:3000"
+      - "${KANGENTIX_BIND:-127.0.0.1}:${KANGENTIX_PORT:-3000}:3000"
     environment:
       PORT: 3000
       NODE_ENV: production
-      DATABASE_URL: postgresql://aira:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/aira
+      DATABASE_URL: postgresql://kangentix:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/kangentix
       APP_SECRET: ${APP_SECRET:?Set APP_SECRET in .env}
       APP_URL: ${APP_URL:-http://localhost:3000}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       TRUST_PROXY: ${TRUST_PROXY:-false}
-      SANDBOX_DOCKER_IMAGE: aira-sandbox:local
+      SANDBOX_DOCKER_IMAGE: kangentix-sandbox:local
       RUN_TIMEOUT_SECONDS: ${RUN_TIMEOUT_SECONDS:-900}
     volumes:
       - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock

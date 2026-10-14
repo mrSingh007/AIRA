@@ -19,12 +19,13 @@ import {
   UserPlus,
   Users,
 } from "lucide-react";
-import type { Member, ModelProvider, Project, ProjectData, Step } from "../shared/types";
+import type { Member, ModelProvider, Project, ProjectData, ProjectPermission, Step } from "../shared/types";
+import { hasProjectPermission, projectPermissions } from "../shared/permissions";
 import { api, errorMessage } from "./api";
 import { randomId } from "./id";
 import { requiredApprovalCount } from "../shared/workflow";
 import { Avatar, Spinner } from "./ui";
-import { concurrentSandboxLimit, projectSettings, settleSettingsSave } from "./project-settings";
+import { concurrentSandboxLimit, projectSettings } from "./project-settings";
 
 export function Config({
   data,
@@ -40,9 +41,22 @@ export function Config({
   setError: (value: string) => void;
 }) {
   const project = data.project;
-  const [section, setSection] = useState<"settings" | "workflow" | "people">(
-    "settings",
+  const canGeneral = hasProjectPermission(project, userId, "generalRead");
+  const canWriteGeneral = hasProjectPermission(project, userId, "generalWrite");
+  const canSandbox = hasProjectPermission(project, userId, "sandboxRead");
+  const canWriteSandbox = hasProjectPermission(project, userId, "sandboxWrite");
+  const visibleMembers = data.members.filter((member) => !member.isSystemUser || member.id === userId);
+  const canWorkflow = hasProjectPermission(project, userId, "workflowWrite");
+  const canPeople = hasProjectPermission(project, userId, "peopleRead");
+  const canWritePeople = hasProjectPermission(project, userId, "peopleWrite");
+  const actorPermissions = projectPermissions(project, userId);
+  const [section, setSection] = useState<"settings" | "sandbox" | "workflow" | "people">(
+    canGeneral ? "settings" : canSandbox ? "sandbox" : canWorkflow ? "workflow" : "people",
   );
+  useEffect(() => {
+    if ((section === "settings" && !canGeneral) || (section === "sandbox" && !canSandbox) || (section === "workflow" && !canWorkflow) || (section === "people" && !canPeople))
+      setSection(canGeneral ? "settings" : canSandbox ? "sandbox" : canWorkflow ? "workflow" : "people");
+  }, [section, canGeneral, canSandbox, canWorkflow, canPeople]);
   const [busy, setBusy] = useState("");
   const [settings, setSettings] = useState(() => projectSettings(project));
   const settingsBaseline = useRef(JSON.stringify(projectSettings(project)));
@@ -80,7 +94,7 @@ export function Config({
   const [email, setEmail] = useState("");
   const [memberName, setMemberName] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<"admin" | "member">("member");
+  const [permissions, setPermissions] = useState<ProjectPermission[]>([]);
   const [matches, setMatches] = useState<Member[]>([]);
   const [searched, setSearched] = useState(false);
   async function action(key: string, work: () => Promise<void>) {
@@ -97,31 +111,47 @@ export function Config({
   }
   async function saveSettings(event: FormEvent) {
     event.preventDefault();
+    const editingSandbox = section === "sandbox";
+    if (editingSandbox ? !canWriteSandbox : !canWriteGeneral) return;
     const maxConcurrentRuns = concurrentSandboxLimit(settings.maxConcurrentRuns);
-    if (maxConcurrentRuns === null) {
+    if (editingSandbox && maxConcurrentRuns === null) {
       setError("Concurrent sandboxes must be a whole number from 1 to 2,147,483,647.");
       return;
     }
+    const fields = editingSandbox
+      ? ["model", "modelProvider", "sandboxProvider", "dockerImage", "e2bTemplate", "maxConcurrentRuns"] as const
+      : ["name", "description", "repository", "baseBranch"] as const;
+    const payload = editingSandbox ? {
+      model: settings.model, modelProvider: settings.modelProvider,
+      sandboxProvider: settings.sandboxProvider, dockerImage: settings.dockerImage,
+      e2bTemplate: settings.e2bTemplate, maxConcurrentRuns,
+      ...(settings.modelProvider === "ollama" && ollamaApiKey.trim() ? { ollamaApiKey: ollamaApiKey.trim() } : {}),
+      ...(settings.modelProvider === "claude" && claudeApiKey.trim() ? { claudeApiKey: claudeApiKey.trim() } : {}),
+      ...(e2bApiKey.trim() ? { e2bApiKey: e2bApiKey.trim() } : {}),
+    } : { name: settings.name, description: settings.description, repository: settings.repository, baseBranch: settings.baseBranch };
     await action("settings", async () => {
-      const saved = await api<Project>(`/projects/${project.id}`, "PATCH", {
-        ...settings,
-        maxConcurrentRuns,
-        ...(settings.modelProvider === "ollama" && ollamaApiKey.trim() ? { ollamaApiKey: ollamaApiKey.trim() } : {}),
-        ...(settings.modelProvider === "claude" && claudeApiKey.trim() ? { claudeApiKey: claudeApiKey.trim() } : {}),
-        ...(e2bApiKey.trim() ? { e2bApiKey: e2bApiKey.trim() } : {}),
-      });
+      const saved = await api<Project>(`/projects/${project.id}`, "PATCH", payload);
       const savedSettings = projectSettings(saved);
       settingsBaseline.current = JSON.stringify(savedSettings);
-      setSettings((current) => settleSettingsSave(current, settings, savedSettings));
-      if (settings.modelProvider === "ollama")
-        setOllamaApiKey((current) => current === ollamaApiKey ? "" : current);
-      if (settings.modelProvider === "claude")
-        setClaudeApiKey((current) => current === claudeApiKey ? "" : current);
-      setE2bApiKey((current) => current === e2bApiKey ? "" : current);
+      setSettings((current) => {
+        const next = { ...current };
+        for (const field of fields) {
+          if (current[field] === settings[field]) Object.assign(next, { [field]: savedSettings[field] });
+        }
+        return next;
+      });
+      if (editingSandbox) {
+        if (settings.modelProvider === "ollama")
+          setOllamaApiKey((current) => current === ollamaApiKey ? "" : current);
+        if (settings.modelProvider === "claude")
+          setClaudeApiKey((current) => current === claudeApiKey ? "" : current);
+        setE2bApiKey((current) => current === e2bApiKey ? "" : current);
+      }
       notify("Project settings saved.");
     });
   }
   async function connectGithub() {
+    if (!canWriteGeneral) return;
     await action("github", async () => {
       const result = await api<{
         identity: string;
@@ -174,7 +204,7 @@ export function Config({
   async function saveWorkflow(event: FormEvent) {
     event.preventDefault();
     if (
-      steps.some((step) => step.requiredApprovals > step.approverIds.length)
+      steps.some((step) => step.requiredApprovals > reviewerCount(step))
     ) {
       setError(
         "Each step needs at least as many eligible reviewers as required approvals.",
@@ -185,12 +215,13 @@ export function Config({
       await api(`/projects/${project.id}/workflow`, "PUT", { steps });
       notify(
         data.workflowLocked
-          ? "Agent models and instructions saved. Future runs will use these settings."
+          ? "Workflow settings saved. Reviewer changes apply to unfinished tickets; agent settings apply to future runs."
           : "Workflow saved. Your next ticket will follow these steps.",
       );
     });
   }
   async function searchMember() {
+    if (!canWritePeople) return;
     setBusy("search");
     setError("");
     try {
@@ -208,17 +239,19 @@ export function Config({
   }
   async function addMember(event: FormEvent) {
     event.preventDefault();
+    if (!canWritePeople) return;
     await action("member", async () => {
       await api(`/projects/${project.id}/members`, "POST", {
         email: email.trim(),
         ...(memberName.trim() ? { name: memberName.trim() } : {}),
         ...(password ? { password } : {}),
-        role,
+        role: "member",
+        permissions,
       });
       setEmail("");
       setMemberName("");
       setPassword("");
-      setRole("member");
+      setPermissions([]);
       setSearched(false);
       setMatches([]);
       notify("Member added to the project.");
@@ -236,11 +269,11 @@ export function Config({
         </div>
         <span className="admin-label">
           <ShieldCheck size={15} />
-          Admin access
+          Project access
         </span>
       </div>
       <div className="config-tabs">
-        <button
+        {canGeneral && <button
           className={section === "settings" ? "active" : ""}
           onClick={() => {
             setSection("settings");
@@ -248,9 +281,16 @@ export function Config({
           }}
         >
           <Settings2 size={16} />
-          General & integrations
-        </button>
-        <button
+          General
+        </button>}
+        {canSandbox && <button
+          className={section === "sandbox" ? "active" : ""}
+          onClick={() => { setSection("sandbox"); setError(""); }}
+        >
+          <Cpu size={16} />
+          Sandbox &amp; models
+        </button>}
+        {canWorkflow && <button
           className={section === "workflow" ? "active" : ""}
           onClick={() => {
             setSection("workflow");
@@ -259,8 +299,8 @@ export function Config({
         >
           <Layers3 size={16} />
           Workflow
-        </button>
-        <button
+        </button>}
+        {canPeople && <button
           className={section === "people" ? "active" : ""}
           onClick={() => {
             setSection("people");
@@ -268,11 +308,13 @@ export function Config({
           }}
         >
           <Users size={16} />
-          People<span className="small-count">{data.members.length}</span>
-        </button>
+          Users<span className="small-count">{visibleMembers.length}</span>
+        </button>}
       </div>
-      {section === "settings" ? (
+      {(section === "settings" && canGeneral) || (section === "sandbox" && canSandbox) ? (
         <form onSubmit={saveSettings} className="config-form">
+          <fieldset className="config-panel-fieldset" disabled={!!busy || (section === "settings" ? !canWriteGeneral : !canWriteSandbox)}>
+          {section === "settings" ? <>
           <section className="config-section">
             <div className="config-section-title">
               <span className="config-icon">
@@ -414,7 +456,7 @@ export function Config({
                   />
                 </label>
               </div>
-              <button
+              {canWriteGeneral && <button
                 type="button"
                 className="button"
                 onClick={() => void connectGithub()}
@@ -432,9 +474,10 @@ export function Config({
                       : "Connect GitHub"}
                   </>
                 )}
-              </button>
+              </button>}
             </div>
           </section>
+          </> : <>
           <section className="config-section">
             <div className="config-section-title">
               <span className="config-icon">
@@ -584,7 +627,7 @@ export function Config({
                         dockerImage: event.target.value,
                       })
                     }
-                    placeholder="aira-sandbox:latest"
+                    placeholder="kangentix-sandbox:local"
                     required
                   />
                   <small>
@@ -646,7 +689,9 @@ export function Config({
               </div>
             </div>
           </section>
-          <div className="config-savebar">
+          </>}
+          </fieldset>
+          {(section === "settings" ? canWriteGeneral : canWriteSandbox) && <div className="config-savebar">
             <span>
               <KeyRound size={14} />
               Leave credential fields blank to keep existing keys.
@@ -657,13 +702,13 @@ export function Config({
               ) : (
                 <>
                   <Save size={15} />
-                  Save project settings
+                  {section === "settings" ? "Save general settings" : "Save sandbox & models"}
                 </>
               )}
             </button>
-          </div>
+          </div>}
         </form>
-      ) : section === "workflow" ? (
+      ) : section === "workflow" && canWorkflow ? (
         <form onSubmit={saveWorkflow} className="workflow-form">
           <div
             className={`info-box ${data.workflowLocked ? "warning-box" : ""}`}
@@ -677,8 +722,8 @@ export function Config({
               </strong>
               <p>
                 {data.workflowLocked
-                  ? "Admins can edit and save Model and Agent instructions. All other workflow fields stay locked while the current sprint has unfinished tickets. Finish those tickets or return them to Backlog to unlock the workflow. Agent setting changes apply to future runs."
-                  : "Rename the first parking column and add steps for your team. Choose which steps run an agent or create a pull request. All workflow settings are editable when the current sprint is empty or every ticket is Done. With unfinished sprint tickets, only agent models and instructions remain editable."}
+                  ? "You can edit models, agent instructions, eligible reviewers, and required approvals. Workflow structure stays locked until unfinished tickets are completed or returned to Backlog. Agent settings apply to future runs."
+                  : "Rename the first parking column and add steps for your team. Choose which steps run an agent or create a pull request. All workflow settings are editable when the current sprint is empty or every ticket is Done. With unfinished sprint tickets, models, instructions, eligible reviewers, and required approvals remain editable."}
               </p>
             </div>
           </div>
@@ -895,19 +940,18 @@ export function Config({
                       <input
                         type="number"
                         value={step.requiredApprovals}
-                        min={step.approverIds.length ? 1 : 0}
-                        max={step.approverIds.length}
+                        min={reviewerCount(step) ? 1 : 0}
+                        max={reviewerCount(step)}
                         disabled={
-                          !step.approverIds.length ||
-                          data.workflowLocked ||
+                          !reviewerCount(step) ||
                           !!busy
                         }
                         onChange={(event) =>
                           updateStep(step.id, {
                             requiredApprovals: Math.min(
-                              step.approverIds.length,
+                              reviewerCount(step),
                               Math.max(
-                                step.approverIds.length ? 1 : 0,
+                                reviewerCount(step) ? 1 : 0,
                                 Number(event.target.value),
                               ),
                             ),
@@ -922,7 +966,7 @@ export function Config({
                     <div className="approver-field">
                       <span className="field-label">Eligible reviewers</span>
                       <div className="approver-options">
-                        {data.members.map((member) => (
+                        {visibleMembers.map((member) => (
                           <label
                             className={`approver-option ${step.approverIds.includes(member.id) ? "selected" : ""}`}
                             key={member.id}
@@ -938,15 +982,15 @@ export function Config({
                                     );
                                 updateStep(step.id, {
                                   approverIds,
-                                  requiredApprovals: approverIds.length
+                                  requiredApprovals: approverIds.length + (step.hiddenApproverCount ?? 0)
                                     ? Math.min(
-                                        approverIds.length,
+                                        approverIds.length + (step.hiddenApproverCount ?? 0),
                                         Math.max(1, step.requiredApprovals),
                                       )
                                     : 0,
                                 });
                               }}
-                              disabled={data.workflowLocked || !!busy}
+                              disabled={!!busy}
                             />
                             <Avatar small name={member.name} />
                             <span>{member.name}</span>
@@ -1007,7 +1051,7 @@ export function Config({
             </div>
           </div>
         </form>
-      ) : (
+      ) : canPeople ? (
         <div className="people-layout">
           <section className="config-section">
             <div className="config-section-title">
@@ -1016,11 +1060,11 @@ export function Config({
               </span>
               <div>
                 <h2>Your project team</h2>
-                <p>Shared access to tickets, documents, and conversations.</p>
+                <p>Everyone can work on sprint, backlog, and done tickets. Optional permissions control the other features.</p>
               </div>
             </div>
             <div className="member-list">
-              {data.members.map((member) => (
+              {visibleMembers.map((member) => (
                 <div className="member-row" key={member.id}>
                   <Avatar name={member.name} />
                   <div>
@@ -1035,18 +1079,32 @@ export function Config({
                   <span
                     className={`badge ${member.role === "admin" ? "accent" : ""}`}
                   >
-                    {member.role}
+                    {member.isSystemUser ? "System user" : "Member"}
                   </span>
+                  <PermissionOptions
+                    permissions={projectPermissions(project, member.id)}
+                    actorPermissions={actorPermissions}
+                    disabled={!!busy || !canWritePeople || !!member.isSystemUser || member.id === userId || projectPermissions(project, member.id).some((permission) => !actorPermissions.includes(permission))}
+                    name={member.name}
+                    onChange={(next) => void action(`permissions-${member.id}`, async () => {
+                      await api(`/projects/${project.id}/members/${member.id}`, "PATCH", { permissions: next });
+                      notify(`Permissions saved for ${member.name}.`);
+                    })}
+                  />
                   <button
                     type="button"
                     className="icon-button danger"
                     title={
-                      member.id === userId
-                        ? "You cannot remove yourself here"
-                        : "Remove from this project"
+                      member.isSystemUser
+                        ? "The system user always has full project access"
+                        : member.id === userId
+                          ? "You cannot remove yourself here"
+                          : projectPermissions(project, member.id).some((permission) => !actorPermissions.includes(permission))
+                            ? "This member has permissions you do not have"
+                            : "Remove from this project"
                     }
                     aria-label={`Remove ${member.name} from project`}
-                    disabled={!!busy || member.id === userId}
+                    disabled={!!busy || !canWritePeople || member.id === userId || !!member.isSystemUser || projectPermissions(project, member.id).some((permission) => !actorPermissions.includes(permission))}
                     onClick={() =>
                       void action(`remove-${member.id}`, async () => {
                         await api(
@@ -1077,7 +1135,8 @@ export function Config({
                 <p>Add an existing account or create a new one.</p>
               </div>
             </div>
-            <form className="config-fields" onSubmit={addMember}>
+            <form onSubmit={addMember}>
+              <fieldset className="config-fields config-panel-fieldset" disabled={!!busy || !canWritePeople}>
               <label>
                 Email address
                 <div className="inline-field">
@@ -1163,23 +1222,7 @@ export function Config({
                   users keep their own password.
                 </small>
               </label>
-              <label>
-                Project role
-                <select
-                  value={role}
-                  onChange={(event) =>
-                    setRole(event.target.value as "admin" | "member")
-                  }
-                >
-                  <option value="member">Member</option>
-                  <option value="admin">Project admin</option>
-                </select>
-                <small>
-                  {role === "admin"
-                    ? "Admins can manage settings, workflow, and people for this project."
-                    : "Members can work on tickets and conversations in this project."}
-                </small>
-              </label>
+              <PermissionOptions permissions={permissions} actorPermissions={actorPermissions} disabled={!!busy || !canWritePeople} name="new member" onChange={setPermissions} />
               <button className="button primary" disabled={!!busy}>
                 {busy === "member" ? (
                   <Spinner label="Adding…" />
@@ -1190,13 +1233,52 @@ export function Config({
                   </>
                 )}
               </button>
+              </fieldset>
             </form>
           </section>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
 function FileLabel({ filename }: { filename: string }) {
   return <code className="filename-label">{filename}</code>;
+}
+
+const permissionLabels: { id: ProjectPermission; label: string }[] = [
+  { id: "analytics", label: "Analytics" },
+  { id: "peopleRead", label: "Users — Read" },
+  { id: "peopleWrite", label: "Users — Write" },
+  { id: "workflowWrite", label: "Workflow — Write" },
+  { id: "generalRead", label: "General — Read" },
+  { id: "generalWrite", label: "General — Write" },
+  { id: "sandboxRead", label: "Sandbox & models — Read" },
+  { id: "sandboxWrite", label: "Sandbox & models — Write" },
+];
+function PermissionOptions({ permissions, actorPermissions, disabled, name, onChange }: {
+  permissions: ProjectPermission[];
+  actorPermissions: ProjectPermission[];
+  disabled: boolean;
+  name: string;
+  onChange: (permissions: ProjectPermission[]) => void;
+}) {
+  return <div className="permission-options">
+    <label className="permission-option permission-basic"><input type="checkbox" checked disabled aria-label={`Basic access for ${name}`} /><span>Basic (Sprint, Backlog &amp; Done)</span><span className="permission-required"><LockKeyhole size={11} /> Required</span></label>
+    {permissionLabels.map(({ id, label }) => <label key={id} className={`permission-option permission-${id}`}>
+      <input type="checkbox" checked={permissions.includes(id)}
+        disabled={disabled || !actorPermissions.includes(id) || (id === "peopleRead" && permissions.includes("peopleWrite")) || (id === "generalRead" && permissions.includes("generalWrite")) || (id === "sandboxRead" && permissions.includes("sandboxWrite"))}
+        aria-label={`${label} access for ${name}`}
+        onChange={(event) => {
+          const next = event.target.checked ? [...permissions, id] : permissions.filter((value) => value !== id);
+          if (next.includes("peopleWrite") && !next.includes("peopleRead")) next.push("peopleRead");
+          if (next.includes("generalWrite") && !next.includes("generalRead")) next.push("generalRead");
+          if (next.includes("sandboxWrite") && !next.includes("sandboxRead")) next.push("sandboxRead");
+          onChange(next);
+        }} /><span>{label}</span>
+    </label>)}
+  </div>;
+}
+
+function reviewerCount(step: Step) {
+  return step.approverIds.length + (step.hiddenApproverCount ?? 0);
 }

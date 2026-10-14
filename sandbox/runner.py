@@ -14,7 +14,7 @@ import tarfile
 import tempfile
 import time
 
-ROOT = pathlib.Path('/tmp/aira')
+ROOT = pathlib.Path('/tmp/kangentix')
 REPO = ROOT / 'repo'
 MAX_FILE = 5 * 1024 * 1024
 MAX_TRANSFER = 20 * 1024 * 1024
@@ -99,7 +99,7 @@ def prepare():
             path.symlink_to(target)
     git('init', '-q')
     git('add', '--all')
-    git('-c', 'user.name=AIRA', '-c', 'user.email=aira@localhost', 'commit', '--allow-empty', '-qm', 'Fresh base snapshot')
+    git('-c', 'user.name=Kangentix', '-c', 'user.email=kangentix@localhost', 'commit', '--allow-empty', '-qm', 'Fresh base snapshot')
     config = json.loads((ROOT / 'input.json').read_text())
     for artifact in config['documents']:
         target = path_for(artifact['path'])
@@ -162,7 +162,7 @@ def run():
         'ANTHROPIC_MODEL': model,
         'DISABLE_TELEMETRY': '1', 'DISABLE_ERROR_REPORTING': '1',
         'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC': '1',
-        'CLAUDE_CONFIG_DIR': '/tmp/aira-claude',
+        'CLAUDE_CONFIG_DIR': '/tmp/kangentix-claude',
     })
     args = ['claude', '-p', '--bare', '--output-format', 'stream-json', '--verbose', '--no-session-persistence', '--dangerously-skip-permissions', '--max-turns', '80', '--model', config['model'], '--add-dir', str(ROOT)]
     if not config['implement']:

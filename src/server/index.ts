@@ -97,7 +97,7 @@ async function main() {
   startWorker();
   const port = Number(process.env.PORT || 3000);
   const server = app.listen(port, "0.0.0.0", () =>
-    console.log(`AIRA listening on port ${port}.`),
+    console.log(`Kangentix listening on port ${port}.`),
   );
   let shuttingDown = false;
   const shutdown = () => {
@@ -123,9 +123,9 @@ async function main() {
 }
 main().catch((error) => {
   console.error(
-    error instanceof Error && /APP_SECRET|APP_URL|Another AIRA/.test(error.message)
+    error instanceof Error && /APP_SECRET|APP_URL|Another Kangentix/.test(error.message)
       ? error.message
-      : "AIRA could not start. Check DATABASE_URL, database connectivity, and application configuration.",
+      : "Kangentix could not start. Check DATABASE_URL, database connectivity, and application configuration.",
   );
   process.exit(1);
 });

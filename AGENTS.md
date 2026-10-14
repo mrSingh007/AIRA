@@ -1,6 +1,6 @@
-# Working on AIRA
+# Working on Kangentix
 
-AIRA is a self-hosted agentic Kanban board for bounded agent execution with people in the loop. Teams collaborate through configurable manual/agent steps, Markdown documents, discussions, human reviews and approvals, and GitHub PR publication. React and Express share TypeScript contracts; PostgreSQL persists state. Claude Code executes in disposable Docker or E2B sandboxes using Ollama Cloud or Claude as the model provider.
+Kangentix is a self-hosted agentic Kanban board for bounded agent execution with people in the loop. Teams collaborate through configurable manual/agent steps, Markdown documents, discussions, human reviews and approvals, and GitHub PR publication. React and Express share TypeScript contracts; PostgreSQL persists state. Claude Code executes in disposable Docker or E2B sandboxes using Ollama Cloud or Claude as the model provider.
 
 Read [README.md](README.md) for setup and [docs/FEATURES.md](docs/FEATURES.md) for product behavior. This file covers implementation guidance; inspect the relevant code before changing it.
 
@@ -15,7 +15,7 @@ Read [README.md](README.md) for setup and [docs/FEATURES.md](docs/FEATURES.md) f
 
 | Area | Start here |
 | --- | --- |
-| Public data contracts and shared workflow rules | `src/shared/types.ts`, `src/shared/workflow.ts` |
+| Public data contracts, project permissions, and shared workflow rules | `src/shared/types.ts`, `src/shared/permissions.ts`, `src/shared/workflow.ts` |
 | Board, backlog, sprints, account UI | `src/client/App.tsx` |
 | Project settings, providers, workflows, people | `src/client/Config.tsx`, `src/client/project-settings.ts` |
 | Ticket documents, discussions, approvals, execution history | `src/client/TicketDetail.tsx`, `src/client/TicketImages.tsx`, `src/client/ticket-history.ts`, `src/client/run-logs.ts` |
@@ -51,18 +51,18 @@ For database-backed changes, run integrations against an **isolated disposable P
 
 ```sh
 # Replace this example with your disposable test database's connection string.
-export AIRA_TEST_DATABASE_URL='postgresql://test_user:test_password@127.0.0.1:5433/aira_test'
-DATABASE_URL="$AIRA_TEST_DATABASE_URL" npm test
+export KANGENTIX_TEST_DATABASE_URL='postgresql://test_user:test_password@127.0.0.1:5433/kangentix_test'
+DATABASE_URL="$KANGENTIX_TEST_DATABASE_URL" npm test
 ```
 
-Keep Node test files serial as configured. If recording load-test output, point `AIRA_LOAD_REPORT` to a temporary location rather than adding benchmark files to `docs/`.
+Keep Node test files serial as configured. If recording load-test output, point `KANGENTIX_LOAD_REPORT` to a temporary location rather than adding benchmark files to `docs/`.
 
 For behavior changes, add or update tests that exercise observable outcomes, failure paths, and affected boundaries. Run relevant tests while iterating, then `npm test`, `npm run typecheck`, and `npm run build` before handing off code changes. For documentation-only changes, check accuracy and links; an application rebuild is unnecessary. Report skipped integrations or unavailable live-provider checks explicitly.
 
 ## Adding or editing a feature
 
 1. Trace the affected UI, API validation/authorization, shared contracts, persistence, and worker/runner behavior. Implement each affected layer together; update typed fixtures when contracts change.
-2. Validate request input with the existing Zod schemas. For protected endpoints, authenticate every requester and check project membership/admin permissions at the server boundary, including cached responses, attachments, logs, and paginated history. Preserve the intended public setup/login/health endpoints.
+2. Validate request input with the existing Zod schemas. For protected endpoints, authenticate every requester and check project membership and the required feature permissions at the server boundary, including cached responses, attachments, logs, and paginated history. Check General and Sandbox/model writes independently, including mixed settings requests. Preserve the intended public setup/login/health endpoints.
 3. Use `mutate` for state changes and its supplied database client for queue/settings writes that belong in the same transaction. `readState` returns committed snapshots that must not be modified. Keep run lifecycle/log/concurrency operations in their existing repositories rather than embedding them in project JSON.
 4. Preserve unsaved client form edits during polling and save acknowledgements. Keep board summaries light; fetch full documents, conversations, and private execution logs through ticket-detail endpoints. Maintain stable pagination and cancellation of stale requests.
 5. Update [docs/FEATURES.md](docs/FEATURES.md) for product behavior and README for setup changes. Keep `docs/FEATURES.md` as the single maintained feature guide under `docs/`; screenshot assets such as `docs/homepage.png` and `docs/ticket-detail.png` also belong there. Edit source files, not generated `dist/`, `node_modules/`, or Python cache files.
@@ -71,6 +71,7 @@ For behavior changes, add or update tests that exercise observable outcomes, fai
 
 - Run one application instance. Preserve the worker's PostgreSQL advisory lock and the existing transaction lock order when changing queue or persistence behavior.
 - Tickets are shared without assignees. Ticket fields/images are editable only in Backlog; Done tickets remain read-only with their workflow snapshot and history.
+- Preserve the protected first system account and its full access to every project. Hide its identity from other users in responses and reviewer lists without losing its reviewer assignments or approval totals. Keep cached responses safe for each viewer. Users Write may grant only permissions held by the actor; Write includes Read for the same section.
 - Workflow movement is forward and explicit. Completing an agent run never advances the ticket. Preserve version/run checks for approvals and invalidate approvals when their reviewed work changes.
 - Allow only one pending/running run per ticket, including discussion responses. Project limits are independent; reservations span preparation through outcome persistence and confirmed sandbox cleanup.
 - Capture model provider, model, repository, sandbox settings, and credentials at claim time; concurrency limits are read live. Preserve both saved model keys when switching providers, and use only the selected model key for inference.

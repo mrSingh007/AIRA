@@ -4,6 +4,7 @@ import App from "./App";
 import { ThemeProvider } from "./ThemeProvider";
 import "./styles.css";
 import "./theme.css";
+import "./analytics.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

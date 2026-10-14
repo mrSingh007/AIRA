@@ -7,7 +7,7 @@ import {
 import type { Request, Response, NextFunction } from "express";
 import { ApiError, assert, type State, type StoredUser } from "./state.js";
 
-const cookieName = "aira_session";
+const cookieName = "kangentix_session";
 const maxAge = 7 * 24 * 60 * 60 * 1000;
 let encryptionKey: Buffer;
 let allowedOrigin: string;
@@ -31,7 +31,7 @@ export function initializeSecurity() {
     allowedOrigin = url.origin;
   } catch {
     throw new Error(
-      "APP_URL must be set to the HTTP or HTTPS origin used to open AIRA, without credentials, a path, query, or fragment.",
+      "APP_URL must be set to the HTTP or HTTPS origin used to open Kangentix, without credentials, a path, query, or fragment.",
     );
   }
   encryptionKey = createHash("sha256").update(secret).digest();
@@ -127,7 +127,7 @@ export function authenticate(
   assert(
     allowPasswordChange || !user.mustChangePassword,
     403,
-    "Change your initial password before using AIRA.",
+    "Change your initial password before using Kangentix.",
   );
   return user;
 }

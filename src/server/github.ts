@@ -140,7 +140,7 @@ export async function boundedArchive(response: Response, limit: number, signal?:
   try { releaseStorage = await archiveStorage.acquire("archives", signal); }
   catch (error) { await response.body.cancel().catch(() => undefined); throw error; }
   let directory: string;
-  try { directory = await mkdtemp(join(tmpdir(), "aira-snapshot-")); }
+  try { directory = await mkdtemp(join(tmpdir(), "kangentix-snapshot-")); }
   catch (error) { releaseStorage(); await response.body.cancel(); throw error; }
   const path = join(directory, "repository.tar.gz");
   let cleanupDone = false;
@@ -401,7 +401,7 @@ async function publishImplementationPr(
   if (!changes.length)
     throw new Error("The implementation produced no repository changes.");
   const path = repositoryPath(repository);
-  const branch = `aira/${options.ticketNumber.toLowerCase().replace(/[^a-z0-9-]/g, "-")}/${options.runId.replace(/[^a-z0-9-]/g, "")}`;
+  const branch = `kangentix/${options.ticketNumber.toLowerCase().replace(/[^a-z0-9-]/g, "-")}/${options.runId.replace(/[^a-z0-9-]/g, "")}`;
   type PullRequest = {
     number: number;
     html_url: string;
@@ -511,7 +511,7 @@ async function publishImplementationPr(
       title: `${options.ticketNumber}: ${options.title}`.slice(0, 250),
       head: branch,
       base: baseBranch,
-      body: `Implements ${options.ticketNumber} from AIRA.\n\nBase snapshot: \`${snapshot.sha}\`\n\n${options.reply.slice(0, 20_000)}\n\nTicket artifacts are included under \`docs/aira/${options.ticketNumber}/\`.`,
+      body: `Implements ${options.ticketNumber} from Kangentix.\n\nBase snapshot: \`${snapshot.sha}\`\n\n${options.reply.slice(0, 20_000)}\n\nTicket artifacts are included under \`docs/kangentix/${options.ticketNumber}/\`.`,
     });
   } catch (error) {
     const found = await findExisting();

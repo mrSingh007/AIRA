@@ -3,7 +3,7 @@ import { after, before, test } from "node:test";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 
-const databaseUrl=process.env.AIRA_TEST_DATABASE_URL;
+const databaseUrl=process.env.KANGENTIX_TEST_DATABASE_URL;
 if(databaseUrl) process.env.DATABASE_URL=databaseUrl;
 const integration=databaseUrl?test:test.skip;
 const {initializeDatabase,mutate,readState,pool,closeDatabase,acquireWorkerLock}=await import("../src/server/db.js");
@@ -27,8 +27,8 @@ before(async()=>{
 after(async()=>{
   if(databaseUrl){
     await stopWorker(0);await flushRunLogs();
-    await pool.query("DELETE FROM aira_runs WHERE project_id=$1",[projectId]);
-    await pool.query("DELETE FROM aira_project_agent_settings WHERE project_id=$1",[projectId]);
+    await pool.query("DELETE FROM kangentix_runs WHERE project_id=$1",[projectId]);
+    await pool.query("DELETE FROM kangentix_project_agent_settings WHERE project_id=$1",[projectId]);
     await mutate(state=>{
       const ticketIds=new Set(state.tickets.filter(ticket=>ticket.projectId===projectId).map(ticket=>ticket.id));
       state.projects=state.projects.filter(project=>project.id!==projectId);state.users=state.users.filter(user=>user.id!==userId);
@@ -53,7 +53,7 @@ integration("lost claim acknowledgement recovers one dispatch with its original 
   const clients=new WeakSet<object>();const originalClientQuery=pg.Client.prototype.query;const originalPoolQuery=pool.query.bind(pool);
   (pg.Client.prototype as any).query=function(...args:any[]){
     const result=(originalClientQuery as any).apply(this,args);
-    if(String(args[0]).startsWith("UPDATE aira_runs AS r SET status='running'")&&args[1]?.[0]===run.id)clients.add(this);
+    if(String(args[0]).startsWith("UPDATE kangentix_runs AS r SET status='running'")&&args[1]?.[0]===run.id)clients.add(this);
     if(!lost&&args[0]==="COMMIT"&&clients.has(this))return result.then(()=>{lost=true;resolveLost();throw new Error("Lost committed claim acknowledgement");});
     return result;
   };
@@ -77,7 +77,7 @@ integration("a failed seal rolls back capacity release, then terminal seal and r
   const originalClientQuery=pg.Client.prototype.query;
   (pg.Client.prototype as any).query=function(...args:any[]){
     const result=(originalClientQuery as any).apply(this,args);
-    if(!failed&&String(args[0]).startsWith("UPDATE aira_run_logs SET sealed=true")&&args[1]?.[0]===run.id)return result.then(()=>{failed=true;resolveFailure();throw new Error("Failure at durable seal boundary");});
+    if(!failed&&String(args[0]).startsWith("UPDATE kangentix_run_logs SET sealed=true")&&args[1]?.[0]===run.id)return result.then(()=>{failed=true;resolveFailure();throw new Error("Failure at durable seal boundary");});
     return result;
   };
   try{
@@ -96,7 +96,7 @@ integration("shutdown during a committed claim prevents dispatch and settles the
   const clients=new WeakSet<object>();const originalClientQuery=pg.Client.prototype.query;let held=false;
   (pg.Client.prototype as any).query=function(...args:any[]){
     const result=(originalClientQuery as any).apply(this,args);
-    if(String(args[0]).startsWith("UPDATE aira_runs AS r SET status='running'")&&args[1]?.[0]===run.id)clients.add(this);
+    if(String(args[0]).startsWith("UPDATE kangentix_runs AS r SET status='running'")&&args[1]?.[0]===run.id)clients.add(this);
     if(!held&&args[0]==="COMMIT"&&clients.has(this))return result.then(async(value:any)=>{held=true;resolveCommit();await release;return value;});
     return result;
   };
@@ -120,7 +120,7 @@ integration("claim recovery waits for an unresolved original commit before decid
     heldClient.release=originalRelease;originalRelease?.();
   })();
   (pg.Client.prototype as any).query=function(...args:any[]){
-    if(String(args[0]).startsWith("UPDATE aira_runs AS r SET status='running'")&&args[1]?.[0]===run.id)clients.add(this);
+    if(String(args[0]).startsWith("UPDATE kangentix_runs AS r SET status='running'")&&args[1]?.[0]===run.id)clients.add(this);
     if(!injected&&args[0]==="COMMIT"&&clients.has(this)){
       injected=true;heldClient=this;originalRelease=(this as any).release;(this as any).release=()=>{};
       return Promise.reject(new Error("Connection acknowledgement lost while original commit is unresolved"));
@@ -160,7 +160,7 @@ for(const kind of ["definition","implement"] as const) integration(`cache hydrat
     heldClient.release=originalRelease;originalRelease?.();
   })();
   (pg.Client.prototype as any).query=function(...args:any[]){
-    if(String(args[0]).startsWith("UPDATE aira_runs SET status=$2")&&args[1]?.[0]===run.id&&args[1]?.[1]==="completed")clients.add(this);
+    if(String(args[0]).startsWith("UPDATE kangentix_runs SET status=$2")&&args[1]?.[0]===run.id&&args[1]?.[1]==="completed")clients.add(this);
     if(!injected&&args[0]==="COMMIT"&&clients.has(this)){
       injected=true;heldClient=this;originalRelease=(this as any).release;(this as any).release=()=>{};
       return Promise.reject(new Error("Original outcome commit acknowledgement lost"));

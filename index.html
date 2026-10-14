@@ -3,13 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/kangentix-logo.svg" />
     <meta name="theme-color" content="#10171d" />
-    <meta name="description" content="AIRA — from an idea to a reviewed pull request." />
-    <title>AIRA — Software, in motion</title>
+    <meta name="description" content="Kangentix — from an idea to a reviewed pull request." />
+    <title>Kangentix — Software, in motion</title>
     <script>
       // Apply the saved browser preference before the first paint.
       try {
-        const theme = localStorage.getItem('aira.theme') === 'light' ? 'light' : 'dark';
+        const theme = localStorage.getItem('kangentix.theme') === 'light' ? 'light' : 'dark';
         document.documentElement.dataset.theme = theme;
         document.documentElement.style.colorScheme = theme;
         document.querySelector('meta[name="theme-color"]').content = theme === 'light' ? '#f4f7f6' : '#10171d';

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <title>Kangentix logo</title>
+  <rect width="64" height="64" rx="16" fill="#142b32"/>
+  <path d="M19 15V49M21 33L44 16M21 33L45 49" stroke="#91d9c5" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="44" cy="16" r="6" fill="#e4b970"/>
+  <circle cx="45" cy="49" r="6" fill="#e4b970"/>
+  <circle cx="21" cy="33" r="5" fill="#f3f0e6"/>
+</svg>
