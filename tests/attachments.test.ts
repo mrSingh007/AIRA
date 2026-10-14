@@ -4,7 +4,7 @@ import { attachmentInput, attachmentPath, MAX_IMAGE_BYTES, replaceAttachments } 
 import { ApiError, emptyState } from "../src/server/state.js";
 import type { Ticket, TicketAttachment, TicketAttachmentInput } from "../src/shared/types.js";
 
-const ticket = (): Ticket => ({ id: "ticket", projectId: "project", number: "KANGENTIX-1", title: "Images", description: "", attachments: [], workflowSnapshot: null, priority: "medium", status: "backlog", stepId: null, sprintId: null, createdBy: "user", createdAt: "", updatedAt: "", closedAt: null, pullRequests: [] });
+const ticket = (): Ticket => ({ id: "ticket", projectId: "project", number: "KANGENTIX-1", title: "Images", description: "", attachments: [], workflowSnapshot: null, priority: "medium", status: "backlog", stepId: null, createdBy: "user", createdAt: "", updatedAt: "", closedAt: null, pullRequests: [] });
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=", "base64");
 const upload = (bytes = png): Extract<TicketAttachmentInput, { data: string }> => ({ filename: "image.png", contentType: "image/png", data: bytes.toString("base64") });
 const badRequest = (error: unknown) => error instanceof ApiError && error.status === 400;
@@ -85,13 +85,39 @@ test("decoded size bounds and WebP declared lengths are enforced", () => {
   assert.throws(() => replaceAttachments(state, current, [{ filename: "bad.webp", contentType: "image/webp", data: webp.toString("base64") }]), badRequest);
 });
 
-test("images are editable only outside sprints in backlog and paths cannot escape image directories", () => {
+test("attachments are editable only in backlog and paths cannot escape image directories", () => {
   const state = emptyState(); const current = ticket();
-  for (const changes of [{ status: "active" as const }, { status: "closed" as const }, { status: "backlog" as const, sprintId: "sprint" }]) {
+  for (const changes of [{ status: "active" as const }, { status: "closed" as const }]) {
     Object.assign(current, changes);
     assert.throws(() => replaceAttachments(state, current, []), (error: unknown) => error instanceof ApiError && error.status === 409);
   }
   const attachment: TicketAttachment = { id: "00000000-0000-4000-8000-000000000000", filename: "ignored.png", contentType: "image/png", size: 1 };
   for (const number of ["../KANGENTIX", "KANGENTIX/1", "KANGENTIX_1", ""]) assert.throws(() => attachmentPath(number, attachment), badRequest);
   assert.throws(() => attachmentPath("KANGENTIX-1", { ...attachment, id: "../../escape" }), badRequest);
+});
+
+test("Markdown uploads preserve UTF-8 content and use safe stable document paths", () => {
+  const state = emptyState(); const current = ticket();
+  const content = "# Requirements\n\nSupport café and 世界.\n";
+  replaceAttachments(state, current, [{ filename: "requirements.markdown", contentType: "text/markdown", data: Buffer.from(content).toString("base64") }]);
+  const attachment = current.attachments[0];
+  assert.equal(Buffer.from(state.attachmentData[attachment.id], "base64").toString("utf8"), content);
+  assert.equal(attachmentPath(current.number, attachment), `docs/kangentix/KANGENTIX-1/attachments/${attachment.id}.md`);
+  for (const [filename, bytes] of [["bad.txt", Buffer.from("# Text")], ["bad.md", Buffer.from([0xff, 0xfe])], ["bad.md", Buffer.from("a\0b")]] as const) {
+    assert.throws(() => replaceAttachments(state, current, [{ filename, contentType: "text/markdown", data: bytes.toString("base64") }]), badRequest);
+    assert.equal(current.attachments[0], attachment);
+  }
+});
+
+test("image and Markdown limits are independent and count retained attachments", () => {
+  const state = emptyState(); const current = ticket();
+  const markdown = { filename: "context.md", contentType: "text/markdown" as const, data: Buffer.from("# Context").toString("base64") };
+  const inputs = [...Array.from({ length: 5 }, () => upload()), ...Array.from({ length: 5 }, () => markdown)];
+  assert.equal(attachmentInput.safeParse(inputs).success, true);
+  replaceAttachments(state, current, inputs);
+  assert.equal(current.attachments.length, 10);
+  const retained = current.attachments.map(a => ({ id: a.id }));
+  assert.throws(() => replaceAttachments(state, current, [...retained, markdown]), badRequest);
+  assert.equal(current.attachments.length, 10);
+  assert.equal(attachmentInput.safeParse(Array.from({ length: 6 }, () => markdown)).success, false);
 });

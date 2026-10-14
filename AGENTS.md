@@ -16,7 +16,8 @@ Read [README.md](README.md) for setup and [docs/FEATURES.md](docs/FEATURES.md) f
 | Area | Start here |
 | --- | --- |
 | Public data contracts, project permissions, and shared workflow rules | `src/shared/types.ts`, `src/shared/permissions.ts`, `src/shared/workflow.ts` |
-| Board, backlog, sprints, account UI | `src/client/App.tsx` |
+| Board, backlog, account UI | `src/client/App.tsx`, `src/client/board-tickets.ts` |
+| Project analytics | `src/server/analytics.ts`, `src/client/Analytics.tsx` |
 | Project settings, providers, workflows, people | `src/client/Config.tsx`, `src/client/project-settings.ts` |
 | Ticket documents, discussions, approvals, execution history | `src/client/TicketDetail.tsx`, `src/client/TicketImages.tsx`, `src/client/ticket-history.ts`, `src/client/run-logs.ts` |
 | API validation, authorization, and actions | `src/server/api.ts`, `src/server/security.ts`, `src/server/attachments.ts` |
@@ -65,13 +66,15 @@ For behavior changes, add or update tests that exercise observable outcomes, fai
 2. Validate request input with the existing Zod schemas. For protected endpoints, authenticate every requester and check project membership and the required feature permissions at the server boundary, including cached responses, attachments, logs, and paginated history. Check General and Sandbox/model writes independently, including mixed settings requests. Preserve the intended public setup/login/health endpoints.
 3. Use `mutate` for state changes and its supplied database client for queue/settings writes that belong in the same transaction. `readState` returns committed snapshots that must not be modified. Keep run lifecycle/log/concurrency operations in their existing repositories rather than embedding them in project JSON.
 4. Preserve unsaved client form edits during polling and save acknowledgements. Keep board summaries light; fetch full documents, conversations, and private execution logs through ticket-detail endpoints. Maintain stable pagination and cancellation of stale requests.
-5. Update [docs/FEATURES.md](docs/FEATURES.md) for product behavior and README for setup changes. Keep `docs/FEATURES.md` as the single maintained feature guide under `docs/`; screenshot assets such as `docs/homepage.png` and `docs/ticket-detail.png` also belong there. Edit source files, not generated `dist/`, `node_modules/`, or Python cache files.
+5. Update [docs/FEATURES.md](docs/FEATURES.md) for product behavior and README for setup changes. Keep `docs/FEATURES.md` as the single maintained feature guide under `docs/`; screenshot assets such as `docs/home.png` and `docs/ticket.png` also belong there. Edit source files, not generated `dist/`, `node_modules/`, or Python cache files.
 
 ## Behavior and execution invariants
 
 - Run one application instance. Preserve the worker's PostgreSQL advisory lock and the existing transaction lock order when changing queue or persistence behavior.
-- Tickets are shared without assignees. Ticket fields/images are editable only in Backlog; Done tickets remain read-only with their workflow snapshot and history.
-- Preserve the protected first system account and its full access to every project. Hide its identity from other users in responses and reviewer lists without losing its reviewer assignments or approval totals. Keep cached responses safe for each viewer. Users Write may grant only permissions held by the actor; Write includes Read for the same section.
+- The Board is continuous Kanban without sprints. New tickets can enter the first workflow step directly or move there from Backlog; any unfinished Board ticket locks workflow structure.
+- Tickets are shared without assignees. Require a title and description at creation. Ticket fields and image/Markdown attachments are editable only in Backlog after creation; Done tickets remain read-only with their workflow snapshot and history.
+- Only the protected first system account can create projects. Preserve its full access to every project. Hide its identity from other users in responses and reviewer lists without losing its reviewer assignments or approval totals. Keep cached responses safe for each viewer. Users Write may grant only permissions held by the actor; Write includes Read for the same section.
+- Project ticket prefixes are editable with General Write permission. Preserve existing ticket numbers and prevent collisions when allocating future numbers.
 - Workflow movement is forward and explicit. Completing an agent run never advances the ticket. Preserve version/run checks for approvals and invalidate approvals when their reviewed work changes.
 - Allow only one pending/running run per ticket, including discussion responses. Project limits are independent; reservations span preparation through outcome persistence and confirmed sandbox cleanup.
 - Capture model provider, model, repository, sandbox settings, and credentials at claim time; concurrency limits are read live. Preserve both saved model keys when switching providers, and use only the selected model key for inference.

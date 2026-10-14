@@ -3,6 +3,7 @@ import type { Project } from "../shared/types";
 export function projectSettings(project: Project) {
   return {
     name: project.name,
+    key: project.key,
     description: project.description,
     repository: project.repository,
     baseBranch: project.baseBranch,

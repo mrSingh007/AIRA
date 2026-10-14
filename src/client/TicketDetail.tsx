@@ -441,13 +441,6 @@ function TicketDetailView({
                     : "Completed"}
                 </span>
               </span>
-              <span>
-                <span className="metadata-label">Sprint</span>
-                <span>
-                  {data.sprints.find((sprint) => sprint.id === ticket.sprintId)
-                    ?.name || "Not scheduled"}
-                </span>
-              </span>
             </>
           )}
           <span className="ticket-meta-line">
@@ -542,12 +535,6 @@ function TicketDetailView({
               <div className="read-only-label">
                 <LockKeyhole size={14} />
                 This ticket is done and cannot be edited.
-                {ticket.sprintId &&
-                data.sprints.some(
-                  (sprint) => sprint.id === ticket.sprintId && !sprint.endedAt,
-                )
-                  ? " It will move to the Done archive when the next sprint starts."
-                  : ""}
               </div>
             )}
             {!isBacklog && activeRun && (
@@ -680,6 +667,7 @@ function TicketDetailView({
                         Description
                         <textarea
                           value={description}
+                          required
                           onChange={(event) =>
                             setDescription(event.target.value)
                           }
@@ -1307,10 +1295,7 @@ function TicketDetailView({
               </div>
             )}
             <div className="actionbar-buttons">
-              {ticket.status === "active" &&
-                data.sprints.some(
-                  (sprint) => sprint.id === ticket.sprintId && !sprint.endedAt,
-                ) && (
+              {ticket.status === "active" && (
                   <button
                     className="button"
                     disabled={!!busy || !!activeRun || !!artifactDraft}
@@ -1319,7 +1304,7 @@ function TicketDetailView({
                         ? "Wait for the running agent to finish."
                         : artifactDraft
                           ? "Save or cancel your document edits first."
-                          : "Return to Backlog and clear approvals. Rejoining a sprint starts at the first step."
+                          : "Return to Backlog and clear approvals. Rejoining the Board starts at the first step."
                     }
                     onClick={() =>
                       void action("backlog", async () => {

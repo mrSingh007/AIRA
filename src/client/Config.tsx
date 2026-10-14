@@ -120,7 +120,7 @@ export function Config({
     }
     const fields = editingSandbox
       ? ["model", "modelProvider", "sandboxProvider", "dockerImage", "e2bTemplate", "maxConcurrentRuns"] as const
-      : ["name", "description", "repository", "baseBranch"] as const;
+      : ["name", "key", "description", "repository", "baseBranch"] as const;
     const payload = editingSandbox ? {
       model: settings.model, modelProvider: settings.modelProvider,
       sandboxProvider: settings.sandboxProvider, dockerImage: settings.dockerImage,
@@ -128,7 +128,7 @@ export function Config({
       ...(settings.modelProvider === "ollama" && ollamaApiKey.trim() ? { ollamaApiKey: ollamaApiKey.trim() } : {}),
       ...(settings.modelProvider === "claude" && claudeApiKey.trim() ? { claudeApiKey: claudeApiKey.trim() } : {}),
       ...(e2bApiKey.trim() ? { e2bApiKey: e2bApiKey.trim() } : {}),
-    } : { name: settings.name, description: settings.description, repository: settings.repository, baseBranch: settings.baseBranch };
+    } : { name: settings.name, key: settings.key, description: settings.description, repository: settings.repository, baseBranch: settings.baseBranch };
     await action("settings", async () => {
       const saved = await api<Project>(`/projects/${project.id}`, "PATCH", payload);
       const savedSettings = projectSettings(saved);
@@ -340,8 +340,8 @@ export function Config({
                 </label>
                 <label>
                   Ticket prefix
-                  <input value={project.key} disabled />
-                  <small>Ticket prefixes are permanent.</small>
+                  <input value={settings.key} onChange={event => setSettings({ ...settings, key: event.target.value.toUpperCase() })} required maxLength={10} pattern="[A-Za-z][A-Za-z0-9]{1,9}" />
+                  <small>2–10 letters or numbers, beginning with a letter.</small>
                 </label>
               </div>
               <label>
@@ -717,13 +717,13 @@ export function Config({
             <div>
               <strong>
                 {data.workflowLocked
-                  ? "Unfinished sprint tickets lock workflow structure."
+                  ? "Unfinished board tickets lock workflow structure."
                   : "A workflow that fits the way you build."}
               </strong>
               <p>
                 {data.workflowLocked
                   ? "You can edit models, agent instructions, eligible reviewers, and required approvals. Workflow structure stays locked until unfinished tickets are completed or returned to Backlog. Agent settings apply to future runs."
-                  : "Rename the first parking column and add steps for your team. Choose which steps run an agent or create a pull request. All workflow settings are editable when the current sprint is empty or every ticket is Done. With unfinished sprint tickets, models, instructions, eligible reviewers, and required approvals remain editable."}
+                  : "Rename the first parking column and add steps for your team. Choose which steps run an agent or create a pull request. All workflow settings are editable when the board is empty or every ticket is Done. With unfinished board tickets, models, instructions, eligible reviewers, and required approvals remain editable."}
               </p>
             </div>
           </div>
@@ -928,7 +928,7 @@ export function Config({
                       </label>
                     </>
                   )}
-                  {(step.kind === "sprint" || step.kind === "manual") && (
+                  {(step.kind === "parking" || step.kind === "manual") && (
                     <p className="form-hint">
                       Tickets stay here until the team moves them forward. This
                       step does not run an agent.
@@ -1018,8 +1018,7 @@ export function Config({
           </fieldset>
           <div className="config-savebar">
             <span>
-              Tickets in the last step can be marked Done. Done tickets stay on
-              the board until the next sprint.
+              Tickets in the last step can be marked Done. Done tickets move immediately to the Done archive.
             </span>
             <div className="form-actions">
               <button
@@ -1060,7 +1059,7 @@ export function Config({
               </span>
               <div>
                 <h2>Your project team</h2>
-                <p>Everyone can work on sprint, backlog, and done tickets. Optional permissions control the other features.</p>
+                <p>Everyone can work on board, backlog, and done tickets. Optional permissions control the other features.</p>
               </div>
             </div>
             <div className="member-list">
@@ -1263,7 +1262,7 @@ function PermissionOptions({ permissions, actorPermissions, disabled, name, onCh
   onChange: (permissions: ProjectPermission[]) => void;
 }) {
   return <div className="permission-options">
-    <label className="permission-option permission-basic"><input type="checkbox" checked disabled aria-label={`Basic access for ${name}`} /><span>Basic (Sprint, Backlog &amp; Done)</span><span className="permission-required"><LockKeyhole size={11} /> Required</span></label>
+    <label className="permission-option permission-basic"><input type="checkbox" checked disabled aria-label={`Basic access for ${name}`} /><span>Basic (Board, Backlog &amp; Done)</span><span className="permission-required"><LockKeyhole size={11} /> Required</span></label>
     {permissionLabels.map(({ id, label }) => <label key={id} className={`permission-option permission-${id}`}>
       <input type="checkbox" checked={permissions.includes(id)}
         disabled={disabled || !actorPermissions.includes(id) || (id === "peopleRead" && permissions.includes("peopleWrite")) || (id === "generalRead" && permissions.includes("generalWrite")) || (id === "sandboxRead" && permissions.includes("sandboxWrite"))}

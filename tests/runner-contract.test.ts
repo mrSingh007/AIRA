@@ -177,3 +177,15 @@ test("implementation supplies Kangentix instructions and document paths to the s
   assert.deepEqual(external.input?.documents.map(document => document.path), ["docs/kangentix/KANGENTIX-1/definition.md"]);
   assert.ok(external.commands.some(command => command.includes("python3 /tmp/kangentix/runner.py run")));
 });
+
+test("Markdown ticket attachments are supplied to document agents with readable file references", async (t) => {
+  const ctx = context();
+  const content = Buffer.from("# Uploaded context\nRequired behavior.");
+  const attachment = { id: "00000000-0000-4000-8000-000000000001", filename: "requirements.md", contentType: "text/markdown" as const, size: content.length, data: content.toString("base64") };
+  ctx.attachments = [attachment];
+  const external = provider(t, { reply: "Done", artifact: "# Definition" });
+  await executeRun(ctx, async () => {});
+  const input = external.input as unknown as { prompt: string; attachments: Array<{ path: string; content: string }> };
+  assert.match(input.prompt, /requirements\.md/);
+  assert.deepEqual(input.attachments, [{ path: `docs/kangentix/KANGENTIX-1/attachments/${attachment.id}.md`, content: attachment.data }]);
+});

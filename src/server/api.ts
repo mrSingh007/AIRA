@@ -40,7 +40,7 @@ import {
   ensureSystemUser,
   hideSystemUser,
 } from "./state.js";
-import { admitToSprint, canViewAnalytics, projectAnalytics } from "./analytics.js";
+import { canViewAnalytics, projectAnalytics } from "./analytics.js";
 import { implementationReady } from "../shared/workflow.js";
 import { verifyGitHubConnection } from "./github.js";
 import { attachmentInput, replaceAttachments } from "./attachments.js";
@@ -78,8 +78,6 @@ const model = z
 const token = z.string().trim().max(10_000);
 const priority = z.enum(["low", "medium", "high", "urgent"]);
 const param = (req: Request, key: string) => String(req.params[key]);
-const activeSprint = (state: State, projectId: string) =>
-  state.sprints.find((s) => s.projectId === projectId && !s.endedAt);
 async function verifyConnection(githubToken: string, repo?: string) {
   try {
     return await verifyGitHubConnection(githubToken, repo);
@@ -126,7 +124,7 @@ function defaultSteps(): Step[] {
     {
       id: id(),
       name: "Todo",
-      kind: "sprint",
+      kind: "parking",
       filename: "todo.md",
       instructions: "",
       model: "",
@@ -271,7 +269,7 @@ api.post("/projects", async (req, res) => {
     .parse(req.body);
   const result = await mutate(async (state, client) => {
     const user = authenticate(state, req);
-    assert(canCreateProjects(state, user.id), 403, "Project administrator access is required to create projects.");
+    assert(canCreateProjects(state, user.id), 403, "Only the system user can create projects.");
     assert(
       !state.projects.some((p) => p.key === input.key),
       409,
@@ -326,7 +324,6 @@ async function boardBody(state: State, project: StoredProject, viewerId: string)
     members: membersFor(state, project),
     tickets: tickets.map(ticket => ({ ...ticket, description: ticket.description.slice(0, 200),
       workflowSnapshot: ticket.workflowSnapshot?.map(step => ({ ...step, instructions: "" })) ?? null })),
-    sprints: state.sprints.filter((s) => s.projectId === project.id),
     artifacts: state.artifacts.filter((a) => ticketIds.has(a.ticketId)).map(a => ({...a, content: ""})),
     approvals: state.approvals.filter((a) => ticketIds.has(a.ticketId)),
     threads: [], messages: [],
@@ -359,8 +356,12 @@ api.get("/projects/:id/tickets/search", async (req, res) => {
   const user = authenticate(state, req);
   const project = projectFor(state, param(req, "id"), user.id);
   const query = z.string().max(200).parse(req.query.q ?? "").toLowerCase();
-  const ticketIds = state.tickets.filter(ticket => ticket.projectId === project.id &&
-    `${ticket.number} ${ticket.title} ${ticket.description}`.toLowerCase().includes(query)).map(ticket => ticket.id);
+  const ticketIds = state.tickets.filter(ticket => ticket.projectId === project.id && (
+    `${ticket.number} ${ticket.title} ${ticket.description}`.toLowerCase().includes(query) ||
+    state.artifacts.some(artifact => artifact.ticketId === ticket.id && artifact.content.toLowerCase().includes(query)) ||
+    ticket.attachments.some(attachment => attachment.contentType === "text/markdown" &&
+      Buffer.from(state.attachmentData[attachment.id] ?? "", "base64").toString("utf8").toLowerCase().includes(query))
+  )).map(ticket => ticket.id);
   res.setHeader("Cache-Control", "private, no-store");
   res.json({ ticketIds });
 });
@@ -413,6 +414,7 @@ api.get("/runs/:id/logs", async (req,res) => {
   res.json(await viewerResponse(req, await readRunLogs(run.id,version)));
 });
 const projectPatch = z.object({
+  key: z.string().trim().toUpperCase().regex(/^[A-Z][A-Z0-9]{1,9}$/, "Project key must be 2–10 letters or digits and begin with a letter.").optional(),
   name: name.optional(),
   description: z.string().max(10_000).optional(),
   repository: repository.or(z.literal("")).optional(),
@@ -449,7 +451,7 @@ const projectPatch = z.object({
   githubToken: token.optional(),
 });
 function assertSettingsPermissions(project: StoredProject, userId: string, input: z.infer<typeof projectPatch>) {
-  const generalFields = new Set(["name", "description", "repository", "baseBranch", "githubToken"]);
+  const generalFields = new Set(["name", "key", "description", "repository", "baseBranch", "githubToken"]);
   const keys = Object.keys(input);
   if (keys.some(key => generalFields.has(key))) assert(hasProjectPermission(project, userId, "generalWrite"), 403, "General write permission is required.");
   if (keys.some(key => !generalFields.has(key))) assert(hasProjectPermission(project, userId, "sandboxWrite"), 403, "Sandbox and model write permission is required.");
@@ -487,6 +489,7 @@ api.patch("/projects/:id", async (req, res) => {
       maxConcurrentRuns,
       ...settings
     } = input;
+    assert(!settings.key || !state.projects.some(other => other.id !== project.id && other.key === settings.key), 409, "This project key is already used.");
     Object.assign(project, settings);
     if (maxConcurrentRuns !== undefined) await saveConcurrency(project.id,maxConcurrentRuns,client);
     if (verified && nextRepo)
@@ -562,7 +565,7 @@ api.post("/projects/:id/github/connect", async (req, res) => {
 const stepSchema = z.object({
   id: identifier,
   name,
-  kind: z.enum(["sprint", "manual", "definition", "implement"]),
+  kind: z.enum(["parking", "manual", "definition", "implement"]),
   instructions: z.string().max(30_000),
   model: model.or(z.literal("")),
   requiredApprovals: z.number().int().min(0).max(50),
@@ -594,12 +597,12 @@ api.put("/projects/:id/workflow", async (req, res) => {
     const locked = workflowLocked(state, project);
     const first = input.steps[0];
     assert(
-      first.kind === "sprint" && first.id === project.steps[0].id,
+      first.kind === "parking" && first.id === project.steps[0].id,
       400,
       "The first step must retain its identity, kind, and first position.",
     );
     assert(
-      input.steps.slice(1).every((s) => s.kind !== "sprint"),
+      input.steps.slice(1).every((s) => s.kind !== "parking"),
       400,
       "Only the first step may be the ticket parking step.",
     );
@@ -656,7 +659,7 @@ api.put("/projects/:id/workflow", async (req, res) => {
         400,
         "Existing step filenames are stable and cannot be changed.",
       );
-      if (step.kind === "sprint" || step.kind === "manual") {
+      if (step.kind === "parking" || step.kind === "manual") {
         step.instructions = "";
         step.model = "";
         step.includePriorArtifacts = false;
@@ -855,7 +858,8 @@ api.put("/projects/:id/analytics-access", async (req, res) => {
 
 const ticketInput = z.object({
   title: z.string().trim().min(1).max(250),
-  description: z.string().max(50_000).default(""),
+  description: z.string().trim().min(1).max(50_000),
+  status: z.enum(["backlog", "active"]).default("backlog"),
   priority: priority.default("medium"),
   attachments: attachmentInput.optional(),
 });
@@ -865,8 +869,9 @@ api.post("/projects/:id/tickets", async (req, res) => {
     const user = authenticate(state, req);
     const project = projectFor(state, param(req, "id"), user.id);
     // Counting existing tickets must not draft every ticket in the application.
-    const sequence =
-      (original(state.tickets) ?? state.tickets).reduce((count, ticket) => count + Number(ticket.projectId === project.id), 0) + 1;
+    let sequence =
+      (original(state.tickets) ?? state.tickets).reduce((highest, ticket) => ticket.projectId === project.id ? Math.max(highest, Number(ticket.number.match(/-(\d+)$/)?.[1] ?? 0)) : highest, 0) + 1;
+    while (state.tickets.some(ticket => ticket.number === `${project.key}-${sequence}`)) sequence++;
     const ticket: Ticket = {
       id: id(),
       projectId: project.id,
@@ -877,16 +882,16 @@ api.post("/projects/:id/tickets", async (req, res) => {
       attachments: [],
       workflowSnapshot: null,
       status: "backlog",
-      stepId: null,
-      sprintId: null,
+      stepId: input.status === "active" ? project.steps[0].id : null,
       createdBy: user.id,
       createdAt: now(),
       updatedAt: now(),
       closedAt: null,
-      startedAt: null,
+      startedAt: input.status === "active" ? now() : null,
       pullRequests: [],
     };
     if (input.attachments) replaceAttachments(state, ticket, input.attachments);
+    ticket.status = input.status;
     state.tickets.push(ticket);
     audit(
       state,
@@ -894,7 +899,7 @@ api.post("/projects/:id/tickets", async (req, res) => {
       ticket.id,
       user.id,
       "ticket.created",
-      `${ticket.number} created in Backlog.`,
+      `${ticket.number} created ${input.status === "active" ? "on Board" : "in Backlog"}.`,
     );
     return ticket;
   });
@@ -924,7 +929,7 @@ api.patch("/tickets/:id", async (req, res) => {
   const input = z
     .object({
       title: z.string().trim().min(1).max(250).optional(),
-      description: z.string().max(50_000).optional(),
+      description: z.string().trim().min(1).max(50_000).optional(),
       priority: priority.optional(),
       attachments: attachmentInput.optional(),
     })
@@ -934,7 +939,7 @@ api.patch("/tickets/:id", async (req, res) => {
     const { ticket, project } = ticketFor(state, param(req, "id"), user.id);
     assert(ticket.status !== "closed", 409, "Closed tickets are read-only.");
     assert(
-      ticket.status === "backlog" && !ticket.sprintId,
+      ticket.status === "backlog",
       409,
       "Ticket fields can only be edited in Backlog.",
     );
@@ -959,166 +964,60 @@ api.patch("/tickets/:id", async (req, res) => {
   });
   res.json(await viewerResponse(req, result));
 });
-api.post("/projects/:id/backlog/action", async (req, res) => {
-  const input = z
-    .object({
-      ticketIds: z.array(identifier).min(1).max(2000),
-      action: z.enum(["sprint", "close"]),
-    })
-    .parse(req.body);
+api.post("/projects/:id/board/tickets", async (req, res) => {
+  const input = z.object({ ticketIds: z.array(identifier).min(1).max(2000) }).parse(req.body);
   const result = await mutate(async (state, client) => {
     const user = authenticate(state, req);
     const project = projectFor(state, param(req, "id"), user.id);
-    assert(
-      new Set(input.ticketIds).size === input.ticketIds.length,
-      400,
-      "Selected tickets must be unique.",
-    );
-    const tickets = input.ticketIds.map((ticketId) => {
-      const ticket = state.tickets.find(
-        (t) =>
-          t.id === ticketId &&
-          t.projectId === project.id &&
-          t.status === "backlog",
-      );
-      assert(
-        ticket,
-        409,
-        "Selected tickets must belong to this project and still be in Backlog.",
-      );
+    assert(new Set(input.ticketIds).size === input.ticketIds.length, 400, "Selected tickets must be unique.");
+    const tickets = input.ticketIds.map(ticketId => {
+      const ticket = state.tickets.find(ticket => ticket.id === ticketId && ticket.projectId === project.id && ticket.status === "backlog");
+      assert(ticket, 409, "Selected tickets must belong to this project and still be in Backlog.");
       return ticket;
     });
-    const sprint =
-      input.action === "sprint" ? activeSprint(state, project.id) : undefined;
-    assert(
-      input.action !== "sprint" || sprint,
-      409,
-      "Start a sprint before adding tickets.",
-    );
-    const timestamp = now();
-    if (sprint) sprint.ticketIds ??= state.tickets.filter(ticket => ticket.projectId === project.id && ticket.sprintId === sprint.id).map(ticket => ticket.id);
     for (const ticket of tickets) {
-      if (input.action === "sprint") {
-        ticket.status = "active";
-        ticket.stepId = project.steps[0].id;
-        ticket.sprintId = sprint!.id;
-        admitToSprint(sprint!, ticket, timestamp);
-        audit(
-          state,
-          project.id,
-          ticket.id,
-          user.id,
-          "ticket.advanced",
-          `Backlog → ${project.steps[0].name} (${sprint!.name}).`,
-        );
-      } else {
-        ticket.status = "closed";
-        ticket.closedAt = timestamp;
-        ticket.workflowSnapshot = null;
-        audit(
-          state,
-          project.id,
-          ticket.id,
-          user.id,
-          "ticket.closed",
-          "Closed from Backlog — won’t do.",
-        );
-      }
-      ticket.updatedAt = timestamp;
+      assert(!await busy(state, ticket.id, client), 409, "Wait for the running agent before moving this ticket.");
+      ticket.status = "active";
+      ticket.stepId = project.steps[0].id;
+      ticket.startedAt = now();
+      ticket.updatedAt = now();
+      audit(state, project.id, ticket.id, user.id, "ticket.advanced", `Backlog → ${project.steps[0].name}.`);
     }
     return tickets;
   });
   res.json(await viewerResponse(req, result));
 });
-api.post("/projects/:id/sprints", async (req, res) => {
-  const input = z
-    .object({ name: name.optional(), description: z.string().trim().max(2000).default(""), ticketIds: z.array(identifier).max(2000) })
-    .parse(req.body);
+api.post("/projects/:id/backlog/action", async (req, res) => {
+  const input = z.object({ ticketIds: z.array(identifier).min(1).max(2000), action: z.literal("close") }).parse(req.body);
   const result = await mutate(async (state, client) => {
     const user = authenticate(state, req);
-    const project = projectFor(state, param(req, "id"), user.id, true);
-    assert(
-      new Set(input.ticketIds).size === input.ticketIds.length,
-      400,
-      "Selected tickets must be unique.",
-    );
-    for (const tid of input.ticketIds)
-      assert(
-        state.tickets.some(
-          (t) =>
-            t.id === tid &&
-            t.projectId === project.id &&
-            t.status === "backlog",
-        ),
-        409,
-        "Selected tickets must belong to this project and still be in Backlog.",
-      );
-    const previous = activeSprint(state, project.id);
-    if (previous) {
-      previous.ticketIds ??= state.tickets.filter(ticket => ticket.projectId === project.id && ticket.sprintId === previous.id).map(ticket => ticket.id);
-      previous.endedAt = now();
+    const project = projectFor(state, param(req, "id"), user.id);
+    assert(new Set(input.ticketIds).size === input.ticketIds.length, 400, "Selected tickets must be unique.");
+    const tickets = input.ticketIds.map(ticketId => {
+      const ticket = state.tickets.find(ticket => ticket.id === ticketId && ticket.projectId === project.id && ticket.status === "backlog");
+      assert(ticket, 409, "Selected tickets must belong to this project and still be in Backlog.");
+      return ticket;
+    });
+    for (const ticket of tickets) {
+      assert(!await busy(state, ticket.id, client), 409, "Wait for the running agent before closing this ticket.");
+      ticket.status = "closed";
+      ticket.closedAt = now();
+      ticket.updatedAt = now();
+      ticket.workflowSnapshot = null;
+      audit(state, project.id, ticket.id, user.id, "ticket.closed", "Closed from Backlog — won’t do.");
     }
-    const sprint = {
-      id: id(),
-      projectId: project.id,
-      name:
-        input.name ||
-        `Sprint ${state.sprints.filter((s) => s.projectId === project.id).length + 1}`,
-      description: input.description,
-      ticketIds: [] as string[],
-      carriedTicketIds: [] as string[],
-      completedAt: null,
-      startedAt: now(),
-      endedAt: null,
-    };
-    state.sprints.push(sprint);
-    let carried = 0;
-    for (const ticket of state.tickets.filter(
-      (t) => t.projectId === project.id,
-    )) {
-      if (ticket.status === "active") {
-        ticket.sprintId = sprint.id;
-        admitToSprint(sprint, ticket, now(), true);
-        ticket.updatedAt = now();
-        carried++;
-      }
-      if (input.ticketIds.includes(ticket.id)) {
-        ticket.status = "active";
-        ticket.stepId = project.steps[0].id;
-        ticket.sprintId = sprint.id;
-        admitToSprint(sprint, ticket, now());
-        ticket.updatedAt = now();
-        audit(
-          state,
-          project.id,
-          ticket.id,
-          user.id,
-          "ticket.advanced",
-          `Backlog → ${project.steps[0].name} (${sprint.name}).`,
-        );
-      }
-    }
-    audit(
-      state,
-      project.id,
-      null,
-      user.id,
-      "sprint.started",
-      `${sprint.name} started with ${input.ticketIds.length} backlog tickets and ${carried} carried tickets.`,
-    );
-    return sprint;
+    return tickets;
   });
-  res.status(201).json(await viewerResponse(req, result));
+  res.json(await viewerResponse(req, result));
 });
 api.post("/tickets/:id/backlog", async (req, res) => {
   const result = await mutate(async (state, client) => {
     const user = authenticate(state, req);
     const { ticket, project } = ticketFor(state, param(req, "id"), user.id);
-    const sprint = activeSprint(state, project.id);
     assert(
-      ticket.status === "active" && sprint && ticket.sprintId === sprint.id,
+      ticket.status === "active",
       409,
-      "Only unfinished tickets in the current sprint can return to Backlog.",
+      "Only unfinished Board tickets can return to Backlog.",
     );
     assert(
       !await busy(state, ticket.id, client),
@@ -1127,7 +1026,6 @@ api.post("/tickets/:id/backlog", async (req, res) => {
     );
     ticket.status = "backlog";
     ticket.stepId = null;
-    ticket.sprintId = null;
     ticket.workflowSnapshot = null;
     ticket.closedAt = null;
     ticket.startedAt = null;
@@ -1141,7 +1039,7 @@ api.post("/tickets/:id/backlog", async (req, res) => {
       ticket.id,
       user.id,
       "ticket.returned_to_backlog",
-      `Returned from ${sprint.name} to Backlog; approvals cleared. Rejoining a sprint starts at the first workflow step.`,
+      "Returned to Backlog; approvals cleared. Rejoining the Board starts at the first workflow step.",
     );
     return ticket;
   });
@@ -1158,17 +1056,9 @@ api.post("/tickets/:id/next", async (req, res) => {
     );
     assert(ticket.status !== "closed", 409, "This ticket is already closed.");
     if (ticket.status === "backlog") {
-      const sprint = activeSprint(state, project.id);
-      assert(
-        sprint,
-        409,
-        "Start a sprint before adding this ticket.",
-      );
-      sprint.ticketIds ??= state.tickets.filter(item => item.projectId === project.id && item.sprintId === sprint.id).map(item => item.id);
       ticket.status = "active";
       ticket.stepId = project.steps[0].id;
-      ticket.sprintId = sprint.id;
-      admitToSprint(sprint, ticket, now());
+      ticket.startedAt = now();
       audit(
         state,
         project.id,

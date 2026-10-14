@@ -4,7 +4,7 @@ export const PROJECT_PERMISSIONS: readonly ProjectPermission[] = [
   "analytics", "peopleRead", "peopleWrite", "workflowWrite", "generalRead", "generalWrite", "sandboxRead", "sandboxWrite",
 ];
 
-/** Membership always includes Sprint, Backlog, and Done access. */
+/** Membership always includes Board, Backlog, and Done access. */
 export function projectPermissions(
   project: Pick<Project, "roles" | "memberPermissions" | "analyticsMemberIds">,
   userId: string,

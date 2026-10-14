@@ -42,7 +42,7 @@ before(async () => {
     }
     state.projects.push({id:projectId,name:"Concurrent fixture",key:"FIX",description:"",repository:"",baseBranch:"main",model:"test",modelProvider:"ollama",sandboxProvider:"docker",dockerImage:"fixture",e2bTemplate:"",steps:[{id:stepId,name:"Define",kind:"definition",instructions:"",model:"",requiredApprovals:0,approverIds:[],includePriorArtifacts:false,filename:"definition.md"}],roles:{[adminId]:"admin",[memberId]:"member"},githubConnected:false,githubIdentity:"",hasOllamaKey:false,hasClaudeKey:false,hasE2bKey:false,secrets:{githubToken:"",ollamaApiKey:"",claudeApiKey:"",e2bApiKey:""}});
     ensureSystemUser(state);
-    state.tickets.push({id:ticketId,projectId,number:"FIX-1",title:"Concurrent test",description:"",attachments:[],workflowSnapshot:null,priority:"medium",status:"active",stepId,sprintId:null,createdBy:adminId,createdAt:now(),updatedAt:now(),closedAt:null,pullRequests:[]});
+    state.tickets.push({id:ticketId,projectId,number:"FIX-1",title:"Concurrent test",description:"",attachments:[],workflowSnapshot:null,priority:"medium",status:"active",stepId,createdBy:adminId,createdAt:now(),updatedAt:now(),closedAt:null,pullRequests:[]});
   });
   const app = express();
   app.use(express.json(),cookieParser());
@@ -65,7 +65,6 @@ after(async () => {
       state.sessions=state.sessions.filter(session=>![adminId,memberId,outsiderId].includes(session.userId));
       state.projects=state.projects.filter(project=>project.id!==projectId);
       state.tickets=state.tickets.filter(ticket=>!ticketIds.has(ticket.id));
-      state.sprints=state.sprints.filter(sprint=>sprint.projectId!==projectId);
       state.artifacts=state.artifacts.filter(artifact=>!ticketIds.has(artifact.ticketId));
       state.revisions=state.revisions.filter(artifact=>!ticketIds.has(artifact.ticketId));
       state.approvals=state.approvals.filter(approval=>!ticketIds.has(approval.ticketId));
@@ -80,42 +79,27 @@ after(async () => {
 async function request(path:string,body?:unknown,user=0) {
   return fetch(`${origin}/api${path}`,{method:body===undefined?"GET":"PATCH",headers:{Cookie:`kangentix_session=${cookies[user]}`,"Content-Type":"application/json"},body:body===undefined?undefined:JSON.stringify(body)});
 }
-integration("project creation rejects direct member and outsider API requests and rechecks revoked administrator access", async () => {
+integration("project creation denies regular administrators, members and outsiders, including revoked administrators", async () => {
   const create = (user: number, key: string) => fetch(`${origin}/api/projects`, {
     method: "POST", headers: {Cookie: `kangentix_session=${cookies[user]}`, "Content-Type": "application/json"},
     body: JSON.stringify({name: "Creation authorization fixture", key}),
   });
   const before = await readState();
-  let createdProjectId: string | undefined;
+  for (const user of [0, 1, 2]) {
+    assert.equal((await (await request("/auth/me", undefined, user)).json()).canCreateProjects, false);
+    // Authorization precedes even duplicate-key disclosure.
+    assert.equal((await create(user, "FIX")).status, 403);
+    assert.equal((await create(user, "CREATEAUTH")).status, 403);
+  }
+  assert.deepEqual((await readState()).projects, before.projects);
+  assert.deepEqual((await readState()).audit, before.audit);
   try {
-    assert.equal((await (await request("/auth/me", undefined, 0)).json()).canCreateProjects, true);
-    for (const user of [1, 2]) {
-      assert.equal((await (await request("/auth/me", undefined, user)).json()).canCreateProjects, false);
-      // Authorization precedes even duplicate-key disclosure.
-      assert.equal((await create(user, "FIX")).status, 403);
-    }
-    assert.deepEqual((await readState()).projects, before.projects);
-    assert.deepEqual((await readState()).audit, before.audit);
     await mutate(state => { state.projects.find(project => project.id === projectId)!.roles[adminId] = "member"; });
     assert.equal((await create(0, "CREATEAUTH")).status, 403);
     assert.equal((await (await request("/auth/me")).json()).canCreateProjects, false);
-    await mutate(state => { state.projects.find(project => project.id === projectId)!.roles[adminId] = "admin"; });
-    const response = await create(0, "CREATEAUTH");
-    assert.equal(response.status, 201);
-    const created = await response.json();
-    createdProjectId = created.id;
-    assert.equal(created.roles[adminId], "admin");
-    const systemUser = (await readState()).users.find(user => user.isSystemUser)!;
-    assert.equal(created.roles[systemUser.id], undefined);
-    assert.equal((await readState()).projects.find(project => project.id === created.id)!.roles[systemUser.id], "admin");
-    assert.ok((await readState()).projects.some(project => project.id === created.id));
-    assert.equal((await create(0, "CREATEAUTH")).status, 409);
+    assert.deepEqual((await readState()).audit, before.audit);
   } finally {
-    await mutate(state => {
-      state.projects.find(project => project.id === projectId)!.roles[adminId] = "admin";
-      state.projects = state.projects.filter(project => project.id !== createdProjectId);
-      state.audit = state.audit.filter(event => event.projectId !== createdProjectId);
-    });
+    await mutate(state => { state.projects.find(project => project.id === projectId)!.roles[adminId] = "admin"; });
   }
 });
 integration("concurrent board polls share work per viewer while authorizing every requester", async (t) => {

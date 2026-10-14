@@ -50,7 +50,7 @@ function buildPrompt(context: RunContext): string {
         : 'When finished, reply with a concise summary of the actual changes and any remaining limitations. A JSON object with a "reply" string is preferred. Do not invent test results or a PR URL.',
     `Step: ${context.step.name}\nStep instructions:\n${context.step.instructions}`,
     `Ticket ${context.ticket.number}: ${context.ticket.title}\n${context.ticket.description}`,
-    `Attached ticket images are available in the repository. Use the Read tool to inspect them when relevant:\n${JSON.stringify(
+    `Attached ticket images and Markdown files are available in the repository. Use the Read tool to inspect them when relevant:\n${JSON.stringify(
       context.attachments.map((attachment) => ({
         filename: attachment.filename,
         path: attachmentPath(context.ticket.number, attachment),
@@ -124,13 +124,13 @@ export async function executeRun(
         content: artifact.content,
       }))
     : [];
-  const images = context.attachments.map((attachment) => {
+  const attachments = context.attachments.map((attachment) => {
     if (
       !attachment.data ||
       Buffer.from(attachment.data, "base64").length !== attachment.size
     )
       throw new Error(
-        `Ticket image is missing or damaged: ${attachment.filename}.`,
+        `Ticket attachment is missing or damaged: ${attachment.filename}.`,
       );
     return {
       path: attachmentPath(context.ticket.number, attachment),
@@ -144,7 +144,7 @@ export async function executeRun(
     apiKey,
     implement,
     documents,
-    images,
+    attachments,
     timeoutSeconds: Math.ceil(runTimeoutMs / 1000) - 5,
   };
   let sandbox: AgentSandbox | undefined;
@@ -214,7 +214,7 @@ export async function executeRun(
       snapshot,
     );
     const contextPaths = new Set(
-      [...documents, ...images].map((file) => file.path),
+      [...documents, ...attachments].map((file) => file.path),
     );
     if (!changes.some((change) => !contextPaths.has(change.path))) {
       await onLog(
@@ -232,7 +232,7 @@ export async function executeRun(
         mode: "100644",
         content: Buffer.from(document.content).toString("base64"),
       });
-    for (const image of images)
+    for (const image of attachments)
       byPath.set(image.path, {
         path: image.path,
         mode: "100644",

@@ -27,19 +27,19 @@ docker compose ps
 docker compose logs -f app
 ```
 
-After the initial build, start with `docker compose up -d`. Stop with `docker compose down`; this keeps the `postgres_data` volume. `docker compose down -v` deletes the database volume, including accounts and project history. Back up PostgreSQL together with `APP_SECRET`.
+After the initial build, start with `docker compose up -d`. After updating the source, run `docker compose up --build -d` to rebuild and apply the changes, keeping the existing `.env` and `APP_SECRET`. Stop with `docker compose down`; this keeps the `postgres_data` volume. `docker compose down -v` deletes the database volume, including accounts and project history. Back up PostgreSQL together with `APP_SECRET`.
 
-To try a complete workflow, create the initial account and first project, configure GitHub and a model provider, add a document step and a PR step, create a ticket, and start a sprint containing that ticket. Advance with **Next step**, review the generated document, approve when required, then review the PR and mark the ticket Done when its workflow is complete. Use a disposable repository for testing publication.
+To try a complete workflow, create the initial account and first project, configure GitHub and a model provider, add a document step and a PR step, and create a ticket directly on the Board or add it from Backlog. Advance with **Next step**, review the generated document, approve when required, then review the PR and mark the ticket Done when its workflow is complete. Use a disposable repository for testing publication.
 
 ## Accounts, projects, and people
 
 The first visit presents one-time account setup; no default password is shipped. Complete this before exposing the server to others. Sign in with email and password. Accounts assigned an initial password must change it before accessing projects. Sessions expire after seven days, and changing a password revokes that account's existing sessions.
 
-The first account is the protected **system user**. It always has full access and is automatically added to every existing and new project; its project access cannot be removed or reduced. Existing installations promote their original first account without resetting data. The system user and accounts that are administrators of at least one project can create projects; the creator becomes an administrator. Members and accounts without project access cannot create projects; an account without access sees a prompt to ask an administrator to add it to a project. The API enforces these permissions. Accounts must change an assigned initial password before accessing project actions.
+The first account is the protected **system user**. It always has full access and is automatically added to every existing and new project; its project access cannot be removed or reduced. Existing installations promote their original first account without resetting data. Only the system user can create projects, using **Create new project** in the project switcher. Members and accounts without project access cannot create projects; an account without access sees a prompt to ask an administrator to add it to a project. The API enforces these permissions. Accounts must change an assigned initial password before accessing project actions.
 
-Each project has its own name, description, permanent ticket prefix, repository, workflow, integrations, and members. Ticket prefixes contain 2–10 letters or numbers, beginning with a letter, and identify tickets such as `KANG-1`.
+Each project has its own name, description, ticket prefix, repository, workflow, integrations, and members. Ticket prefixes contain 2–10 letters or numbers, beginning with a letter, and identify tickets such as `KANG-1`.
 
-Every project member has **Basic (Sprint, Backlog & Done)** access. This mandatory permission cannot be unchecked, and members remain available as eligible step reviewers. Additional permissions are granted independently for each project:
+Every project member has **Basic (Board, Backlog & Done)** access. This mandatory permission cannot be unchecked, and members remain available as eligible step reviewers. Additional permissions are granted independently for each project:
 
 | Permission | Access |
 | --- | --- |
@@ -47,10 +47,10 @@ Every project member has **Basic (Sprint, Backlog & Done)** access. This mandato
 | Users — Read | View the full Config → Users page, including the user list and disabled create-user panel; cannot search, add, remove, or change users. |
 | Users — Write | Includes Users Read; search and create users, edit their permissions, and remove project access. |
 | Workflow — Write | Edit Config → Workflow, including reviewer rules while structure is locked. |
-| General — Read / Write | View or edit Config → General: project name, permanent ticket prefix, description, and GitHub connection/repository. |
+| General — Read / Write | View or edit Config → General: project name, editable ticket prefix, description, and GitHub connection/repository. Prefix changes apply to future ticket numbers; existing ticket numbers remain stable. |
 | Sandbox & models — Read / Write | View or edit model providers, default model, model credentials, agent sandbox, and concurrency settings. |
 
-Existing administrators retain all permissions and sprint creation. Other members collaborate on tickets, documents, conversations, approvals, and forward movement. Config shows sections allowed by the member's permissions. Write includes Read for the same section. Users Write is required to grant permissions: if the current user has only Read for a section, they can grant only Read; if they have Write, they can grant Read or Write. Existing General Write grants migrate to General Write and Sandbox & models Write so saved access is preserved.
+Project administrators retain all project permissions. Other members collaborate on tickets, documents, conversations, approvals, and forward movement. Config shows sections allowed by the member's permissions. Write includes Read for the same section. Users Write is required to grant permissions: if the current user has only Read for a section, they can grant only Read; if they have Write, they can grant Read or Write. General and Sandbox & models saves require their respective Write permissions.
 
 In **Config → Users**, a user with Users Write can find an existing account by exact email or create a new account with a name and initial password, then choose permissions. New users receive mandatory board access by default. A Users Write user can grant only permissions they hold and cannot change or remove someone whose permissions exceed their own. The system user cannot be removed or have its permissions changed. Only the system user sees its own account in user lists or reviewer selectors; other accounts never receive its identity. The system user can select itself as a workflow reviewer. Other users retain those hidden assignments when saving the workflow; approval counts still include approvals from eligible hidden reviewers. Removing a member removes access to that project, rather than deleting their account or history. Invitation email and password-reset email are not available.
 
@@ -58,7 +58,7 @@ The system user and existing administrators automatically have **Analytics** acc
 
 ## Project settings and integrations
 
-**Config → General** contains project name, permanent ticket prefix, description, and GitHub connection/repository. **Config → Sandbox & models** contains Models & credentials and Agent sandbox, including the concurrent sandbox limit. Settings are project-specific. Each section has independent Read and Write permissions; saves enforce the corresponding Write permission on the server. Saved credentials are encrypted and represented by presence indicators rather than returned in API responses. Leave replacement key fields blank to retain saved values.
+**Config → General** contains project name, editable ticket prefix, description, and GitHub connection/repository. Prefix changes apply to future ticket numbers; existing ticket numbers remain stable. Numbering continues within the project: changing `KANG` to `NEW` after `KANG-1` produces `NEW-2` next, unless that number is already in use. **Config → Sandbox & models** contains Models & credentials and Agent sandbox, including the concurrent sandbox limit. Settings are project-specific. Each section has independent Read and Write permissions; saves enforce the corresponding Write permission on the server. Saved credentials are encrypted and represented by presence indicators rather than returned in API responses. Leave replacement key fields blank to retain saved values.
 
 ### Model provider: Ollama Cloud or Claude
 
@@ -81,23 +81,23 @@ Kangentix verifies the token identity and repository access before saving creden
 
 Every agent request resolves the base branch to an exact commit and receives that repository archive. Agents never receive the GitHub token. The trusted app retrieves snapshots and publishes validated changes through the GitHub API.
 
-## Backlog, tickets, and images
+## Backlog, tickets, and attachments
 
-Create a ticket with a title, Markdown description, and **Low**, **Medium**, **High**, or **Urgent** priority. Tickets have no assignee. Use search to match ticket number, title, or full description, and filter by priority in the project views.
+Create a ticket with a required title, required Markdown description, and **Low**, **Medium**, **High**, or **Urgent** priority. Tickets have no assignee. Use search to match ticket number, title, description, step Markdown documents, or uploaded Markdown content, and filter by priority in the project views.
 
-All ticket fields are editable only in **Backlog**. Backlog details have **Overview** and **Activity** tabs. Select backlog rows to **Add to active sprint** or **Close — won't do**. Closing from Backlog sends the ticket directly to the Done archive.
+All ticket fields are editable only in **Backlog**. Backlog details have **Overview** and **Activity** tabs. Select backlog rows to **Add to Board** or **Close — won't do**. Closing from Backlog sends the ticket directly to the Done archive.
 
-Attach or remove up to five images while creating or editing a backlog ticket. PNG, JPEG, GIF, and WebP are accepted, up to 2 MiB per image. Images are stored in PostgreSQL and served only to authorized project participants. Ticket Markdown renders authenticated attachments inline; other image URLs appear as links, so merely opening a ticket does not request remote images.
+Attach up to five images when creating a ticket on the Board or in Backlog. After creation, add or remove images only while the ticket is in Backlog. PNG, JPEG, GIF, and WebP are accepted, up to 2 MiB per image. Images are stored in PostgreSQL and served only to authorized project participants. Ticket Markdown renders authenticated attachments inline; other image URLs appear as links, so merely opening a ticket does not request remote images.
 
-When a ticket enters a sprint, its title, description, priority, and images become read-only. Each agent run receives attachments at `docs/kangentix/<TicketNumber>/images/<image-id>.<extension>` with file references in its prompt. Published PRs preserve those images with the selected ticket documents.
+When a ticket enters the Board, its title, description, priority, and attachments become read-only. Each agent run receives image attachments at `docs/kangentix/<TicketNumber>/images/<image-id>.<extension>` with file references in its prompt. Published PRs preserve those images with the selected ticket documents.
 
-## Sprints and the board
+Upload up to five UTF-8 Markdown files (`.md` or `.markdown`), up to 2 MiB each, alongside the five-image allowance. Markdown attachments are stored privately, can be downloaded by project participants, contribute to ticket search, and are supplied to agents at `docs/kangentix/<TicketNumber>/attachments/<attachment-id>.md`. Include Markdown uploads when creating tickets on the Board or in Backlog; after creation, add or remove them only in Backlog. Published PRs preserve the uploaded files with the ticket images and selected step documents. The new-ticket dialog supports **Expand** and **Collapse**, with **Close** available in either size.
 
-Administrators start a sprint with selected backlog tickets, an optional name, and an optional description of up to 2,000 characters. Use the description for the sprint goal or an end-date note; it is free text rather than a structured date or deadline. A sprint can start without new backlog tickets. Project members can add more backlog tickets to the active sprint. The board displays one column per configured workflow step, ticket priority, approval progress, queued/running/failed status, cleanup status, and PR links.
+## Kanban board
 
-Starting the next sprint carries unfinished tickets forward at their current steps with documents, discussions, approvals, and run history intact. Completed tickets already appear in the **Done** archive.
+The **Agentic Kanban Board** is an ongoing workflow without sprints. **Create new ticket** creates a ticket directly in the first configured step. **Add from Backlog** selects existing backlog tickets and moves them to that step; Backlog also provides **Add to Board** for selected rows. The board shows one column per configured workflow step, ticket priority, approval progress, queued/running/failed status, cleanup status, and PR links. Search highlights matching cards while keeping nonmatching cards visible; priority filtering still narrows the Board. Backlog and Done search filter their ticket lists. The header shows the unique eligible reviewers across configured workflow steps, respecting system-user visibility rules.
 
-An unfinished ticket can **Move to Backlog** when no agent run is pending or running. This clears its approvals and sprint/step membership while preserving ticket fields, documents, conversations, and run/PR history. Its fields become editable again. Adding it to a sprint later starts it at the first workflow step.
+An unfinished ticket can **Move to Backlog** when no agent run is pending or running. This clears approvals and step membership while preserving ticket fields, documents, conversations, and run/PR history. Its fields become editable again. Returning it to the Board starts a new work period at the first workflow step.
 
 ## Configurable workflow steps
 
@@ -105,16 +105,16 @@ New projects contain only the first **Todo** parking step. Add the remaining sta
 
 | Step configuration | Behavior |
 | --- | --- |
-| First parking step | Holds newly admitted sprint tickets. It has no agent model, instructions, or prior-document option. |
+| First parking step | Holds newly admitted board tickets. It has no agent model, instructions, or prior-document option. |
 | **Agent step** off | Manual stage, for example In QA or Waiting. No sandbox starts. |
 | **Agent step** on, **Create PR from changes** off | Generates a Markdown document saved in Kangentix. The agent can read/search the repository but cannot execute shell commands or change repository files. |
 | **Agent step** on, **Create PR from changes** on | Lets the agent edit code, install dependencies, build, and test within its sandbox. Kangentix publishes a verified PR, or records a successful no-change result. |
 
 For added steps, choose a name, eligible reviewers, and required approval count. Agent steps also have instructions, an optional model override, and **Include documents from prior steps**. This setting controls whether earlier ticket documents are included in the agent's context. Documents have stable filenames independent of step display names.
 
-You can add, remove, rename, and reorder later steps while the active sprint is empty or contains only Done tickets. Once unfinished sprint tickets exist, structure stays locked, but users with Workflow Write can still change **eligible reviewers**, **required approvals**, and agent-step **models and instructions**. Changing reviewer rules clears approvals for the affected steps on active tickets so that the new rules must be reviewed. Changes to agent models and instructions preserve approvals and apply to future runs. Done tickets retain their saved workflow and approvals.
+You can add, remove, rename, and reorder later steps while the board has no unfinished tickets. Once unfinished board tickets exist, structure stays locked, but users with Workflow Write can still change **eligible reviewers**, **required approvals**, and agent-step **models and instructions**. Changing reviewer rules clears approvals for the affected steps on active tickets so that the new rules must be reviewed. Changes to agent models and instructions preserve approvals and apply to future runs. Done tickets retain their saved workflow and approvals.
 
-Movement within a sprint is forward. **Next step** checks the current step's work and approvals, then moves the ticket. Entering an agent step queues its initial run. Completing a run does not automatically advance a ticket.
+Workflow movement on the Board is forward. **Next step** checks the current step's work and approvals, then moves the ticket. Entering an agent step queues its initial run. Completing a run does not automatically advance a ticket.
 
 ## Documents and agent discussions
 
@@ -148,7 +148,7 @@ PR merging is a separate action in GitHub. Marking a ticket Done does not merge 
 
 ## Execution, logs, activity, and recovery
 
-Open a sprint ticket's **Execution** tab to inspect every agent run, including discussion responses. Runs are **pending**, **running**, **completed**, or **failed**. Expand a run to see its saved logs; active logs update by polling. Use **Run step**, **Retry step**, or document **Rerun** when available. Only one pending/running run is allowed per ticket, including discussion responses.
+Open a board ticket's **Execution** tab to inspect every agent run, including discussion responses. Runs are **pending**, **running**, **completed**, or **failed**. Expand a run to see its saved logs; active logs update by polling. Use **Run step**, **Retry step**, or document **Rerun** when available. Only one pending/running run is allowed per ticket, including discussion responses.
 
 Logs include assistant progress, tool inputs, commands and file paths, and bounded result excerpts. Known credentials are redacted before buffering/truncation; hidden model reasoning is not saved. The retained log tail is bounded to 200,000 characters, and omitted details are explicitly marked. Ticket **Activity** records changes, decisions, and workflow actions. Execution and activity history load in pages, while selected-ticket details retain full documents and conversations.
 
@@ -166,13 +166,11 @@ Marking a ticket Done removes it from the active board and moves it to the **Don
 
 Open **Analytics** in the sidebar to review delivery counts and timing metrics for the selected project. The system user and existing administrators have access automatically; other members see this view when granted Analytics permission in **Config → Users**. The API checks current project membership and analytics permission on every request.
 
-Completed delivery counts include tickets marked Done through their workflow; backlog tickets closed as won't do are excluded. Cycle time measures the current work period from sprint entry to Done. Lead time measures ticket creation to Done. Active age measures the time since an unfinished ticket entered its current work period. Carrying a ticket into the next sprint preserves its work-period start; returning it to Backlog resets that start, and a later sprint entry begins a new work period.
+Completed delivery counts include tickets marked Done through their workflow; backlog tickets closed as won't do are excluded. Average completion time measures the current work period from Board entry to Done. Median completion time and creation-to-Done lead time are also shown. Active age measures elapsed time since an unfinished ticket entered the Board. Returning a ticket to Backlog resets its work-period start; later Board entry starts a new work period.
 
-Sprint scope counts every admitted ticket, including tickets carried in and tickets added after the sprint starts. Carried-in tickets are counted separately. Completion compares delivered tickets with that scope. A nonempty sprint is complete only when every scoped ticket is delivered while it is active or by its recorded end. An ended sprint's completed and remaining counts use delivery status at its end; carried tickets completed afterward remain unfinished in that earlier sprint's metrics. Sprint elapsed time runs from its start to completion when recorded, otherwise to its end for an ended sprint, or to now for the active sprint. Sprint descriptions are notes and do not define a deadline for these calculations.
+Average close rate is the number of workflow deliveries in the rolling last **28 days**, divided by **four weeks**, including weeks with no deliveries. The view shows the period and delivery count. It is separate from completion duration. Counts by Low, Medium, High, and Urgent priority show Backlog, unfinished Board tickets, and their combined total; Done tickets are excluded. The Board total includes all unfinished board tickets.
 
-Project summary metrics include all relevant tickets. Detail lists show up to the 500 latest delivered tickets and the 500 oldest active tickets; detail filters apply to those bounded lists.
-
-Missing historical timestamps are shown as unavailable and excluded from timing averages. They are not inferred from ticket updates or sprint dates.
+Summary metrics include all relevant tickets. Detail lists show up to the 500 latest delivered tickets and the 500 oldest active tickets. Missing or invalid timing values appear as unavailable and are excluded from timing averages.
 
 ## Docker sandboxes and custom runtimes
 
@@ -227,11 +225,14 @@ Repository preparation has a separate fair gate of four transfers. Immutable arc
 | Markdown document | Manual saves: 500,000 characters; generated documents: 500,000 UTF-8 bytes. |
 | Combined prompt context | 2 MiB. |
 | Ticket images | Five images; 2 MiB each. |
+| Ticket Markdown attachments | Five UTF-8 files; 2 MiB each. |
 | Docker runtime resources | Two CPUs, 4 GiB memory, 2 GiB `/tmp`, 256 processes per container. |
 
 Oversized or unsupported inputs fail explicitly. An application concurrency setting does not reserve host resources, E2B quotas, model capacity, or GitHub rate limits. One hundred fully loaded Docker agents can demand up to 400 GiB container memory and 200 CPU equivalents before host/app/database overhead. Size capacity for the combined demand of every project and measured workloads; real 100-sandbox provider capacity is not established by the application limit.
 
 ## Appearance
+
+The sidebar lists Board, Backlog, Done, Analytics, and Config according to access, with a project switcher above and theme/account controls below. The logo tagline is “Define with your team. Build with your agent.” A shared footer reads “Every step, decision, and conversation stays with your ticket.” and links Kangentix to its repository. Licensing remains MIT.
 
 Choose **Light** or **Dark** under **Appearance** in the sidebar or sign-in screen. Dark is the default. The selection persists in browser local storage across reloads/sign-ins and is shared with tabs on the same origin. It is not an account or project setting and does not follow you to another browser.
 
@@ -268,4 +269,4 @@ The complete test command requires Python 3.10+ and Git in addition to Node.js. 
 DATABASE_URL="$KANGENTIX_TEST_DATABASE_URL" npm test
 ```
 
-Automated coverage includes workflow and approval rules, project authorization, ticket images, scheduling and concurrency, persistence/recovery, preparation/cancellation, GitHub result validation, sandbox contracts/path safety, client polling/settings, and log bounds/redaction. Live provider execution, model behavior, GitHub permissions, and infrastructure capacity still need testing with suitable credentials and disposable repositories.
+Automated coverage includes workflow and approval rules, project authorization, direct Board creation, Markdown and image attachments, document search, scheduling and concurrency, persistence/recovery, preparation/cancellation, GitHub result validation, sandbox contracts/path safety, client polling/settings, and log bounds/redaction. Live provider execution, model behavior, GitHub permissions, and infrastructure capacity still need testing with suitable credentials and disposable repositories.

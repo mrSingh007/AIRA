@@ -20,13 +20,14 @@ export const attachmentInput = z
             .max(200)
             .refine(
               (value) => !/[\\/\x00-\x1f\x7f]/.test(value),
-              "Use a simple image filename.",
+              "Use a simple attachment filename.",
             ),
           contentType: z.enum([
             "image/png",
             "image/jpeg",
             "image/gif",
             "image/webp",
+            "text/markdown",
           ]),
           data: z
             .string()
@@ -36,27 +37,41 @@ export const attachmentInput = z
         .strict(),
     ]),
   )
-  .max(5, "Attach at most 5 images.");
+  .max(10, "Attach at most 5 images and 5 Markdown files.")
+  .superRefine((inputs, context) => {
+    for (const markdown of [false, true]) {
+      if (inputs.filter(input => "contentType" in input && (input.contentType === "text/markdown") === markdown).length > 5)
+        context.addIssue({ code: "custom", message: markdown ? "Attach at most 5 Markdown files." : "Attach at most 5 images." });
+    }
+  });
 
-function imageBytes(
+function attachmentBytes(
   input: Extract<TicketAttachmentInput, { data: string }>,
 ): Buffer {
   assert(
     /^[A-Za-z0-9+/]*={0,2}$/.test(input.data),
     400,
-    "Image data must be valid base64.",
+    "Attachment data must be valid base64.",
   );
   const bytes = Buffer.from(input.data, "base64");
   assert(
     bytes.toString("base64") === input.data,
     400,
-    "Image data must be valid base64.",
+    "Attachment data must be valid base64.",
   );
   assert(
     bytes.length > 0 && bytes.length <= MAX_IMAGE_BYTES,
     400,
-    "Each image must be at most 2 MiB.",
+    "Each attachment must be at most 2 MiB.",
   );
+  if (input.contentType === "text/markdown") {
+    assert(/\.(md|markdown)$/i.test(input.filename), 400, "Markdown attachments must use a .md or .markdown filename.");
+    let text: string;
+    try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+    catch { assert(false, 400, "Markdown attachments must contain valid UTF-8 text."); }
+    assert(!text.includes("\0"), 400, "Markdown attachments cannot contain null bytes.");
+    return bytes;
+  }
   const matches = {
     "image/png":
       bytes.length >= 33 &&
@@ -92,9 +107,9 @@ export function replaceAttachments(
   inputs: TicketAttachmentInput[],
 ): void {
   assert(
-    ticket.status === "backlog" && !ticket.sprintId,
+    ticket.status === "backlog",
     409,
-    "Images can only be changed while the ticket is in Backlog.",
+    "Attachments can only be changed while the ticket is in Backlog.",
   );
   const data: Record<string, string> = {};
   const attachments: TicketAttachment[] = inputs.map((input) => {
@@ -105,11 +120,11 @@ export function replaceAttachments(
       assert(
         current && state.attachmentData[current.id],
         400,
-        "An attached image no longer exists or belongs to another ticket.",
+        "An attachment no longer exists or belongs to another ticket.",
       );
       return current;
     }
-    const bytes = imageBytes(input);
+    const bytes = attachmentBytes(input);
     const attachment = {
       id: id(),
       filename: input.filename,
@@ -123,8 +138,11 @@ export function replaceAttachments(
     new Set(attachments.map((attachment) => attachment.id)).size ===
       attachments.length,
     400,
-    "Images must be distinct.",
+    "Attachments must be distinct.",
   );
+  assert(attachments.filter(a => a.contentType === "text/markdown").length <= 5 &&
+    attachments.filter(a => a.contentType !== "text/markdown").length <= 5, 400,
+    "Attach at most 5 images and 5 Markdown files.");
   for (const previous of ticket.attachments)
     if (!attachments.some((attachment) => attachment.id === previous.id))
       delete state.attachmentData[previous.id];
@@ -141,13 +159,15 @@ export function attachmentPath(
     "image/jpeg": "jpg",
     "image/gif": "gif",
     "image/webp": "webp",
+    "text/markdown": "md",
   }[attachment.contentType];
   assert(
     /^[A-Za-z0-9-]+$/.test(ticketNumber) &&
       /^[a-f0-9-]{36}$/.test(attachment.id) &&
       extension,
     400,
-    "Invalid ticket image path.",
+    "Invalid ticket attachment path.",
   );
-  return `docs/kangentix/${ticketNumber}/images/${attachment.id}.${extension}`;
+  const directory = attachment.contentType === "text/markdown" ? "attachments" : "images";
+  return `docs/kangentix/${ticketNumber}/${directory}/${attachment.id}.${extension}`;
 }

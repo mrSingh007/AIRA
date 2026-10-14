@@ -42,7 +42,7 @@ class SandboxRunnerTests(unittest.TestCase):
                 else:
                     entry.size = len(content)
                     archive.addfile(entry, io.BytesIO(content))
-        (self.root / 'input.json').write_text(json.dumps({'documents': [], 'images': []}))
+        (self.root / 'input.json').write_text(json.dumps({'documents': [], 'attachments': []}))
 
     def agent_config(self, provider='claude'):
         config = {'modelProvider': provider, 'apiKey': 'selected-secret',
@@ -158,16 +158,17 @@ print(json.dumps({'type': 'result', 'result': json.dumps({'reply': 'Done'})}))
         with self.assertRaisesRegex(RuntimeError, 'symbolic link'):
             runner.prepare()
 
-    def test_prepare_loads_documents_and_images_on_clean_snapshot(self):
+    def test_prepare_loads_documents_and_attachments_on_clean_snapshot(self):
         self.archive([('README.md', b'base', None), ('readme-link', b'', 'README.md')])
         (self.root / 'input.json').write_text(json.dumps({
             'documents': [{'path': 'docs/definition.md', 'content': 'definition'}],
-            'images': [{'path': 'images/a.png', 'content': base64.b64encode(b'image').decode()}],
+            'attachments': [{'path': 'images/a.png', 'content': base64.b64encode(b'image').decode()}, {'path': 'attachments/context.md', 'content': base64.b64encode('# Context: café'.encode()).decode()}],
         }))
         runner.prepare()
         self.assertEqual((self.repo / 'readme-link').read_text(), 'base')
         self.assertEqual((self.repo / 'docs/definition.md').read_text(), 'definition')
         self.assertEqual((self.repo / 'images/a.png').read_bytes(), b'image')
+        self.assertEqual((self.repo / 'attachments/context.md').read_text(), '# Context: café')
         self.assertEqual(runner.git('show', 'HEAD:README.md'), b'base')
         self.assertEqual(runner.git('log', '-1', '--format=%an <%ae>').strip(), b'Kangentix <kangentix@localhost>')
         self.assertNotIn(b'docs/definition.md', runner.git('ls-tree', '-r', 'HEAD'))
@@ -175,7 +176,7 @@ print(json.dumps({'type': 'result', 'result': json.dumps({'reply': 'Done'})}))
     def test_prepare_rejects_document_writes_to_symlinks(self):
         self.archive([('original', b'base', None), ('link', b'', 'original')])
         (self.root / 'input.json').write_text(json.dumps({
-            'documents': [{'path': 'link', 'content': 'overwrite'}], 'images': [],
+            'documents': [{'path': 'link', 'content': 'overwrite'}], 'attachments': [],
         }))
         with self.assertRaisesRegex(RuntimeError, 'destination must not be a symbolic link'):
             runner.prepare()

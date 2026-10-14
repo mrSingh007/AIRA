@@ -6,7 +6,7 @@ import { Config } from "./Config";
 import { concurrentSandboxLimit, settleSettingsSave } from "./project-settings";
 
 const savedSettings = {
-  name: "Project", description: "", repository: "owner/repo", baseBranch: "main",
+  key: "TEAM", name: "Project", description: "", repository: "owner/repo", baseBranch: "main",
   model: "model", modelProvider: "ollama" as const, sandboxProvider: "docker" as const, dockerImage: "image", e2bTemplate: "",
   maxConcurrentRuns: "100",
 };
@@ -43,7 +43,7 @@ function configData(sandboxProvider: SandboxProvider = "docker", modelProvider: 
         maxConcurrentRuns: 101, steps: [], roles: { member: "member" }, memberPermissions: { member: ["sandboxWrite"] }, githubConnected: false,
         githubIdentity: "", hasOllamaKey: false, hasClaudeKey: false, hasE2bKey: false,
       },
-      members: [], sprints: [], tickets: [], artifacts: [], approvals: [], threads: [], messages: [],
+      members: [], tickets: [], artifacts: [], approvals: [], threads: [], messages: [],
       runs: [], audit: [], workflowLocked: false,
     };
 }
@@ -95,4 +95,11 @@ for (const modelProvider of ["ollama", "claude"] as const) {
 test("save acknowledgement preserves provider changes made while a request is in flight", () => {
   const current = { ...savedSettings, modelProvider: "claude" as const, model: "sonnet" };
   assert.equal(settleSettingsSave(current, savedSettings, savedSettings), current);
+});
+
+test("save acknowledgement preserves an edited ticket prefix", () => {
+  const submitted = { ...savedSettings, key: "NEW" };
+  const current = { ...submitted, key: "LATEST" };
+  assert.equal(settleSettingsSave(current, submitted, submitted).key, "LATEST");
+  assert.equal(settleSettingsSave(submitted, submitted, submitted).key, "NEW");
 });
