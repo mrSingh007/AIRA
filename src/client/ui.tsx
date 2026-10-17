@@ -172,7 +172,7 @@ export function Brand() {
     <div className="brand">
       <img className="brand-mark" src="/kangentix-logo.svg" alt="" aria-hidden="true" />
       <span>
-        Kangentix
+        KanGentiX
       </span>
     </div>
   );

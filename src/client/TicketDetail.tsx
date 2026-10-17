@@ -882,7 +882,7 @@ function TicketDetailView({
                                 )?.name ||
                                   (event.userId
                                     ? "Former member"
-                                    : "Kangentix")}{" "}
+                                    : "KanGentiX")}{" "}
                                 · {dateLabel(event.createdAt)}
                               </small>
                             </div>
@@ -1009,7 +1009,7 @@ function TicketDetailView({
                           Updated {dateLabel(artifact.updatedAt)} ·{" "}
                           {data.members.find(
                             (member) => member.id === artifact.updatedBy,
-                          )?.name || "Kangentix"}
+                          )?.name || "KanGentiX"}
                         </div>
                       </>
                     ) : (
@@ -1135,7 +1135,7 @@ function TicketDetailView({
                           )}
                           <strong>
                             {message.role === "assistant"
-                              ? "Kangentix"
+                              ? "KanGentiX"
                               : message.role === "system"
                                 ? "System"
                                 : data.members.find(
@@ -1152,7 +1152,7 @@ function TicketDetailView({
                         <Sparkles size={13} className="pulse" />
                         {activeRun.status === "pending"
                           ? "Waiting for the agent…"
-                          : "Kangentix is thinking…"}
+                          : "KanGentiX is thinking…"}
                       </div>
                     )}
                   </div>
