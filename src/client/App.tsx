@@ -1205,7 +1205,7 @@ export function ProjectsApp({
               )}
             </>
           )}
-          <footer className="project-footer"><span><img src="/kangentix-logo.svg" alt="" width="18" height="18" />Every step, decision, and conversation stays with your ticket.</span><a href="https://github.com/mrSingh007/Kangentix" target="_blank" rel="noreferrer">© Kangentix</a></footer>
+          <footer className="project-footer"><span><img src="/kangentix-logo.svg" alt="" width="18" height="18" />Every step, decision, and conversation stays with your ticket.</span><a href="https://github.com/mrSingh007/Kangentix" target="_blank" rel="noreferrer">© KanGentiX</a></footer>
         </div>
       </main>
       {dialog && (dialog !== "project" || canCreateProjects) && (

@@ -20,7 +20,7 @@ The screenshots below show an earlier development build. Labels and layout may d
 
 Track tickets across your workflow, with priorities, agent status, and approval progress visible to the team.
 
-![Kangentix Kanban board showing configurable workflow columns, ticket priorities, and approval progress](docs/home.png)
+[Watch the Kanban board demo on YouTube](https://www.youtube.com/watch?v=ksMT3OKyH_k)
 
 ### Documents, discussions, and approvals
 
