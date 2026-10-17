@@ -1,4 +1,4 @@
-# Kangentix
+# KanGentiX
 
 <img src="public/kangentix-logo.svg" alt="Kangentix logo" width="80" height="80" />
 
